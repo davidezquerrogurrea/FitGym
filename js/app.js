@@ -1,0 +1,1038 @@
+(() => {
+  const monthLabel = document.getElementById("monthLabel");
+  const weekdayLabels = document.getElementById("weekdayLabels");
+  const calendarGrid = document.getElementById("calendarGrid");
+  const prevMonthBtn = document.getElementById("prevMonth");
+  const nextMonthBtn = document.getElementById("nextMonth");
+  const routineModal = document.getElementById("routineModal");
+  const routineDateTitle = document.getElementById("routineDateTitle");
+  const routineState = document.getElementById("routineState");
+  const routineForm = document.getElementById("routineForm");
+  const addExerciseBtn = document.getElementById("addExerciseBtn");
+  const exercisesList = document.getElementById("exercisesList");
+  const closeModalBtn = document.getElementById("closeModal");
+  const saveRoutineBtn = routineForm ? routineForm.querySelector("button[type='submit']") : null;
+
+  if (
+    !monthLabel || !weekdayLabels || !calendarGrid || !prevMonthBtn || !nextMonthBtn ||
+    !routineModal || !routineDateTitle || !routineState || !routineForm || !addExerciseBtn ||
+    !exercisesList || !closeModalBtn || !saveRoutineBtn
+  ) {
+    return;
+  }
+
+  const monthNames = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ];
+  const weekdayNames = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
+  const localStorageKey = "fitgym_routines_v1";
+  const fullDateFormatter = new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+  const savedAtFormatter = new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  const viewDate = new Date();
+  viewDate.setDate(1);
+
+  const routinesByDate = {};
+  const localAdapter = createLocalAdapter();
+  let persistence = createPersistenceAdapter(localAdapter);
+  let selectedDateKey = "";
+  let lastTriggerButton = null;
+  let isSaving = false;
+
+  init();
+
+  async function init() {
+    renderWeekdays();
+    await bootstrapRoutines();
+    renderCalendar();
+  }
+
+  async function bootstrapRoutines() {
+    setState("Cargando rutinas...");
+
+    const loaded = await persistence.loadAll();
+    if (!loaded.ok) {
+      if (persistence.kind === "supabase") {
+        persistence = localAdapter;
+        const fallback = await localAdapter.loadAll();
+        if (fallback.ok) {
+          replaceRoutines(fallback.data);
+          setState("Supabase no disponible. Trabajando en modo local.");
+          return;
+        }
+      }
+      setState("No se pudieron cargar las rutinas.");
+      return;
+    }
+
+    replaceRoutines(loaded.data);
+    if (persistence.kind === "supabase") {
+      setState("Conectado a Supabase.");
+    } else {
+      setState("Modo local activo.");
+    }
+  }
+
+  function setState(message) {
+    routineState.textContent = message || "";
+  }
+
+  function getErrorMessage(result, fallbackMessage) {
+    if (result && result.error && typeof result.error.message === "string" && result.error.message) {
+      return `${fallbackMessage} (${result.error.message})`;
+    }
+    return fallbackMessage;
+  }
+
+  function setSavingState(busy) {
+    isSaving = busy;
+    saveRoutineBtn.disabled = busy;
+    addExerciseBtn.disabled = busy;
+    saveRoutineBtn.textContent = busy ? "Guardando..." : "Guardar rutina";
+  }
+
+  function replaceRoutines(nextMap) {
+    Object.keys(routinesByDate).forEach((key) => {
+      delete routinesByDate[key];
+    });
+    Object.assign(routinesByDate, nextMap);
+  }
+
+  function renderWeekdays() {
+    weekdayLabels.innerHTML = "";
+    weekdayNames.forEach((dayName) => {
+      const dayLabel = document.createElement("span");
+      dayLabel.textContent = dayName;
+      weekdayLabels.appendChild(dayLabel);
+    });
+  }
+
+  function buildStartDate(date) {
+    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const mondayOffset = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - mondayOffset);
+    return start;
+  }
+
+  function toDateKey(date) {
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    ].join("-");
+  }
+
+  function toDateFromKey(dateKey) {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+
+  function capitalizeFirst(text) {
+    if (!text) {
+      return "";
+    }
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function formatFullDate(dateKey) {
+    return capitalizeFirst(fullDateFormatter.format(toDateFromKey(dateKey)));
+  }
+
+  function formatSavedAt(isoDate) {
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return savedAtFormatter.format(date);
+  }
+
+  function formatWeight(value) {
+    if (!Number.isFinite(value)) {
+      return "-";
+    }
+    return Number(value.toFixed(2)).toString();
+  }
+
+  function sanitizeSetEntry(rawSet) {
+    if (!rawSet || typeof rawSet !== "object") {
+      return null;
+    }
+
+    const reps = Number(rawSet.reps);
+    const weightKg = Number(rawSet.weightKg);
+
+    if (
+      !Number.isFinite(reps) || reps < 1 ||
+      !Number.isFinite(weightKg) || weightKg < 0
+    ) {
+      return null;
+    }
+
+    return {
+      reps: Math.trunc(reps),
+      weightKg: Number(weightKg.toFixed(2))
+    };
+  }
+
+  function sanitizeExerciseEntry(rawExercise) {
+    if (!rawExercise || typeof rawExercise !== "object") {
+      return null;
+    }
+
+    const exerciseName = typeof rawExercise.exerciseName === "string"
+      ? rawExercise.exerciseName.trim()
+      : typeof rawExercise.name === "string"
+        ? rawExercise.name.trim()
+        : "";
+
+    if (!exerciseName) {
+      return null;
+    }
+
+    const sets = [];
+    if (Array.isArray(rawExercise.sets)) {
+      rawExercise.sets.forEach((rawSet) => {
+        const cleanedSet = sanitizeSetEntry(rawSet);
+        if (cleanedSet) {
+          sets.push(cleanedSet);
+        }
+      });
+    } else {
+      const legacySingleSet = sanitizeSetEntry(rawExercise);
+      if (legacySingleSet) {
+        sets.push(legacySingleSet);
+      }
+    }
+
+    if (sets.length === 0) {
+      return null;
+    }
+
+    return {
+      exerciseName,
+      sets
+    };
+  }
+
+  function sanitizeRoutineEntry(rawEntry) {
+    if (!rawEntry || typeof rawEntry !== "object") {
+      return null;
+    }
+
+    const exercises = [];
+
+    if (Array.isArray(rawEntry.exercises)) {
+      rawEntry.exercises.forEach((rawExercise) => {
+        const cleanedExercise = sanitizeExerciseEntry(rawExercise);
+        if (cleanedExercise) {
+          exercises.push(cleanedExercise);
+        }
+      });
+    } else {
+      const legacyExercise = sanitizeExerciseEntry(rawEntry);
+      if (legacyExercise) {
+        exercises.push(legacyExercise);
+      }
+    }
+
+    if (exercises.length === 0) {
+      return null;
+    }
+
+    return {
+      exercises,
+      updatedAt: typeof rawEntry.updatedAt === "string" ? rawEntry.updatedAt : null
+    };
+  }
+
+  function parseLocalMap(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+
+    const cleaned = {};
+    Object.keys(raw).forEach((dateKey) => {
+      const routine = sanitizeRoutineEntry(raw[dateKey]);
+      if (routine) {
+        cleaned[dateKey] = routine;
+      }
+    });
+    return cleaned;
+  }
+
+  function createLocalAdapter() {
+    return {
+      kind: "local",
+      async loadAll() {
+        try {
+          const raw = localStorage.getItem(localStorageKey);
+          if (!raw) {
+            return { ok: true, data: {} };
+          }
+          const parsed = JSON.parse(raw);
+          return { ok: true, data: parseLocalMap(parsed) };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+      async saveDay(dateKey, routine) {
+        try {
+          const currentRaw = localStorage.getItem(localStorageKey);
+          const currentMap = parseLocalMap(currentRaw ? JSON.parse(currentRaw) : {});
+          currentMap[dateKey] = routine;
+          localStorage.setItem(localStorageKey, JSON.stringify(currentMap));
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+      async deleteDay(dateKey) {
+        try {
+          const currentRaw = localStorage.getItem(localStorageKey);
+          const currentMap = parseLocalMap(currentRaw ? JSON.parse(currentRaw) : {});
+          delete currentMap[dateKey];
+          localStorage.setItem(localStorageKey, JSON.stringify(currentMap));
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      }
+    };
+  }
+
+  function createPersistenceAdapter(fallbackLocalAdapter) {
+    const cfg = window.FITGYM_SUPABASE || {};
+    const hasSupabase = window.supabase && typeof window.supabase.createClient === "function";
+    const hasConfig = typeof cfg.url === "string" && cfg.url && typeof cfg.anonKey === "string" && cfg.anonKey;
+
+    if (!hasSupabase || !hasConfig) {
+      return fallbackLocalAdapter;
+    }
+
+    const client = window.supabase.createClient(cfg.url, cfg.anonKey);
+    return createSupabaseAdapter(client);
+  }
+
+  function createSupabaseAdapter(client) {
+    return {
+      kind: "supabase",
+
+      async loadAll() {
+        const daysRes = await client
+          .from("workout_days")
+          .select("id, session_date, updated_at")
+          .order("session_date", { ascending: true });
+
+        if (daysRes.error) {
+          return { ok: false, error: daysRes.error };
+        }
+
+        const days = Array.isArray(daysRes.data) ? daysRes.data : [];
+        if (days.length === 0) {
+          return { ok: true, data: {} };
+        }
+
+        const dayIds = days.map((d) => d.id);
+        const exercisesRes = await client
+          .from("workout_exercises")
+          .select("id, day_id, exercise_name, exercise_order")
+          .in("day_id", dayIds)
+          .order("exercise_order", { ascending: true });
+
+        if (exercisesRes.error) {
+          return { ok: false, error: exercisesRes.error };
+        }
+
+        const exercises = Array.isArray(exercisesRes.data) ? exercisesRes.data : [];
+        const exerciseIds = exercises.map((e) => e.id);
+
+        let sets = [];
+        if (exerciseIds.length > 0) {
+          const setsRes = await client
+            .from("workout_sets")
+            .select("exercise_id, set_number, reps, weight_kg")
+            .in("exercise_id", exerciseIds)
+            .order("set_number", { ascending: true });
+
+          if (setsRes.error) {
+            return { ok: false, error: setsRes.error };
+          }
+          sets = Array.isArray(setsRes.data) ? setsRes.data : [];
+        }
+
+        const setsByExerciseId = new Map();
+        sets.forEach((setRow) => {
+          if (!setsByExerciseId.has(setRow.exercise_id)) {
+            setsByExerciseId.set(setRow.exercise_id, []);
+          }
+          const cleanedSet = sanitizeSetEntry({
+            reps: setRow.reps,
+            weightKg: Number(setRow.weight_kg)
+          });
+          if (cleanedSet) {
+            setsByExerciseId.get(setRow.exercise_id).push(cleanedSet);
+          }
+        });
+
+        const exercisesByDayId = new Map();
+        exercises.forEach((exerciseRow) => {
+          const rawExercise = {
+            exerciseName: exerciseRow.exercise_name,
+            sets: setsByExerciseId.get(exerciseRow.id) || []
+          };
+          const cleanedExercise = sanitizeExerciseEntry(rawExercise);
+          if (!cleanedExercise) {
+            return;
+          }
+          if (!exercisesByDayId.has(exerciseRow.day_id)) {
+            exercisesByDayId.set(exerciseRow.day_id, []);
+          }
+          exercisesByDayId.get(exerciseRow.day_id).push({
+            ...cleanedExercise,
+            exerciseOrder: exerciseRow.exercise_order
+          });
+        });
+
+        const map = {};
+        days.forEach((dayRow) => {
+          const dayExercises = exercisesByDayId.get(dayRow.id) || [];
+          dayExercises.sort((a, b) => a.exerciseOrder - b.exerciseOrder);
+          const cleaned = dayExercises.map((exercise) => ({
+            exerciseName: exercise.exerciseName,
+            sets: exercise.sets
+          }));
+
+          if (cleaned.length > 0) {
+            map[dayRow.session_date] = {
+              exercises: cleaned,
+              updatedAt: dayRow.updated_at || null
+            };
+          }
+        });
+
+        return { ok: true, data: map };
+      },
+
+      async saveDay(dateKey, routine) {
+        const lookupDayRes = await client
+          .from("workout_days")
+          .select("id, created_at")
+          .eq("session_date", dateKey)
+          .order("created_at", { ascending: true })
+          .limit(1);
+
+        if (lookupDayRes.error) {
+          return { ok: false, error: lookupDayRes.error };
+        }
+
+        let dayId = Array.isArray(lookupDayRes.data) && lookupDayRes.data.length > 0
+          ? lookupDayRes.data[0].id
+          : null;
+
+        if (!dayId) {
+          const insertDayRes = await client
+            .from("workout_days")
+            .insert({
+              session_date: dateKey,
+              updated_at: routine.updatedAt || new Date().toISOString()
+            })
+            .select("id")
+            .single();
+
+          if (insertDayRes.error || !insertDayRes.data) {
+            return { ok: false, error: insertDayRes.error || new Error("No se pudo crear el dia.") };
+          }
+
+          dayId = insertDayRes.data.id;
+        } else {
+          const updateDayRes = await client
+            .from("workout_days")
+            .update({ updated_at: routine.updatedAt || new Date().toISOString() })
+            .eq("id", dayId);
+
+          if (updateDayRes.error) {
+            return { ok: false, error: updateDayRes.error };
+          }
+        }
+
+        const deleteExercisesRes = await client
+          .from("workout_exercises")
+          .delete()
+          .eq("day_id", dayId);
+
+        if (deleteExercisesRes.error) {
+          return { ok: false, error: deleteExercisesRes.error };
+        }
+
+        const exercisePayload = routine.exercises.map((exercise, index) => ({
+          day_id: dayId,
+          exercise_name: exercise.exerciseName,
+          exercise_order: index + 1
+        }));
+
+        const insertExercisesRes = await client
+          .from("workout_exercises")
+          .insert(exercisePayload)
+          .select("id, exercise_order");
+
+        if (insertExercisesRes.error) {
+          return { ok: false, error: insertExercisesRes.error };
+        }
+
+        const insertedExercises = Array.isArray(insertExercisesRes.data) ? insertExercisesRes.data : [];
+        const exerciseIdByOrder = new Map();
+        insertedExercises.forEach((exerciseRow) => {
+          exerciseIdByOrder.set(exerciseRow.exercise_order, exerciseRow.id);
+        });
+
+        const setsPayload = [];
+        routine.exercises.forEach((exercise, exerciseIndex) => {
+          const exerciseId = exerciseIdByOrder.get(exerciseIndex + 1);
+          if (!exerciseId) {
+            return;
+          }
+          exercise.sets.forEach((set, setIndex) => {
+            setsPayload.push({
+              exercise_id: exerciseId,
+              set_number: setIndex + 1,
+              reps: set.reps,
+              weight_kg: set.weightKg
+            });
+          });
+        });
+
+        if (setsPayload.length > 0) {
+          const insertSetsRes = await client
+            .from("workout_sets")
+            .insert(setsPayload);
+
+          if (insertSetsRes.error) {
+            return { ok: false, error: insertSetsRes.error };
+          }
+        }
+
+        return { ok: true };
+      },
+
+      async deleteDay(dateKey) {
+        const deleteDayRes = await client
+          .from("workout_days")
+          .delete()
+          .eq("session_date", dateKey);
+
+        if (deleteDayRes.error) {
+          return { ok: false, error: deleteDayRes.error };
+        }
+        return { ok: true };
+      }
+    };
+  }
+
+  function createSetRow(setData = {}) {
+    const setRow = document.createElement("div");
+    setRow.className = "set-row";
+    setRow.innerHTML = `
+      <div class="set-label"></div>
+      <label class="set-field">
+        <span class="set-field-label">Reps</span>
+        <input class="field-control set-reps" type="number" min="1" step="1" inputmode="numeric" required>
+      </label>
+      <label class="set-field">
+        <span class="set-field-label">Peso (kg)</span>
+        <input class="field-control set-weight" type="number" min="0" step="0.5" inputmode="decimal" required>
+      </label>
+      <button class="set-remove" type="button" aria-label="Eliminar serie">&times;</button>
+    `;
+
+    const repsInput = setRow.querySelector(".set-reps");
+    const weightInput = setRow.querySelector(".set-weight");
+
+    if (repsInput && setData.reps != null) {
+      repsInput.value = String(setData.reps);
+    }
+    if (weightInput && setData.weightKg != null) {
+      weightInput.value = String(setData.weightKg);
+    }
+
+    return setRow;
+  }
+
+  function renumberSetRows(exerciseCard) {
+    const rows = exerciseCard.querySelectorAll(".set-row");
+    rows.forEach((row, index) => {
+      const label = row.querySelector(".set-label");
+      if (label) {
+        label.textContent = `S${index + 1}`;
+      }
+    });
+  }
+
+  function updateExerciseReadSummary(exerciseCard) {
+    const nameInput = exerciseCard.querySelector(".exercise-name");
+    const readName = exerciseCard.querySelector(".exercise-name-read");
+    const readSets = exerciseCard.querySelector(".exercise-read-sets");
+
+    if (!nameInput || !readName || !readSets) {
+      return;
+    }
+
+    const exerciseName = nameInput.value.trim();
+    readName.textContent = exerciseName || "Ejercicio sin nombre";
+
+    const rows = Array.from(exerciseCard.querySelectorAll(".set-row"));
+    if (rows.length === 0) {
+      readSets.innerHTML = `
+        <div class="exercise-read-row">
+          <span>-</span>
+          <strong>Sin series</strong>
+          <strong></strong>
+        </div>
+      `;
+      return;
+    }
+
+    readSets.innerHTML = rows.map((row, index) => {
+      const repsInput = row.querySelector(".set-reps");
+      const weightInput = row.querySelector(".set-weight");
+      const reps = repsInput ? Number(repsInput.value) : NaN;
+      const weightKg = weightInput ? Number(weightInput.value) : NaN;
+      const repsText = Number.isInteger(reps) && reps > 0 ? `${reps} reps` : "Reps -";
+      const weightText = Number.isFinite(weightKg) && weightKg >= 0
+        ? `${formatWeight(weightKg)} kg`
+        : "Peso -";
+
+      return `
+        <div class="exercise-read-row">
+          <span>S${index + 1}</span>
+          <strong>${repsText}</strong>
+          <strong>${weightText}</strong>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function setExerciseReadMode(exerciseCard, isReadOnly) {
+    const toggleBtn = exerciseCard.querySelector(".exercise-edit-toggle");
+    exerciseCard.classList.toggle("is-readonly", isReadOnly);
+    if (toggleBtn) {
+      toggleBtn.textContent = isReadOnly ? "Editar" : "Listo";
+    }
+  }
+
+  function addSetToExercise(exerciseCard, setData = {}) {
+    const setsContainer = exerciseCard.querySelector(".exercise-sets");
+    if (!setsContainer) {
+      return;
+    }
+    setsContainer.appendChild(createSetRow(setData));
+    renumberSetRows(exerciseCard);
+    updateExerciseReadSummary(exerciseCard);
+  }
+
+  function createExerciseCard(exerciseData = {}, options = {}) {
+    const isReadOnly = Boolean(options.readOnly);
+
+    const card = document.createElement("article");
+    card.className = "exercise-card";
+    card.innerHTML = `
+      <div class="exercise-header">
+        <label class="exercise-input-wrap">
+          <span class="exercise-caption">Ejercicio</span>
+          <input class="field-control exercise-name" type="text" maxlength="80" required>
+          <strong class="exercise-name-read"></strong>
+        </label>
+        <div class="exercise-actions">
+          <button class="secondary-btn exercise-edit-toggle" type="button">Listo</button>
+          <button class="exercise-remove" type="button">Eliminar</button>
+        </div>
+      </div>
+      <div class="exercise-read-sets"></div>
+      <div class="exercise-sets"></div>
+      <button class="secondary-btn add-set-btn" type="button">+ Agregar serie</button>
+    `;
+
+    const nameInput = card.querySelector(".exercise-name");
+    if (nameInput && typeof exerciseData.exerciseName === "string") {
+      nameInput.value = exerciseData.exerciseName;
+    }
+
+    exercisesList.appendChild(card);
+
+    if (Array.isArray(exerciseData.sets) && exerciseData.sets.length > 0) {
+      exerciseData.sets.forEach((setData) => addSetToExercise(card, setData));
+    } else {
+      addSetToExercise(card, { reps: 8 });
+    }
+
+    updateExerciseReadSummary(card);
+    setExerciseReadMode(card, isReadOnly);
+    return card;
+  }
+
+  function clearExerciseCards() {
+    exercisesList.innerHTML = "";
+  }
+
+  function loadRoutineIntoForm(routine) {
+    clearExerciseCards();
+
+    if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
+      routine.exercises.forEach((exercise) => {
+        createExerciseCard(exercise, { readOnly: true });
+      });
+    } else {
+      createExerciseCard({}, { readOnly: false });
+    }
+  }
+
+  function collectExerciseFromCard(card, exerciseIndex) {
+    const nameInput = card.querySelector(".exercise-name");
+    const exerciseName = nameInput ? nameInput.value.trim() : "";
+
+    if (!exerciseName) {
+      return {
+        ok: false,
+        message: `Ejercicio ${exerciseIndex + 1}: escribe el nombre del ejercicio.`
+      };
+    }
+
+    const setRows = Array.from(card.querySelectorAll(".set-row"));
+    if (setRows.length === 0) {
+      return {
+        ok: false,
+        message: `${exerciseName}: agrega al menos una serie.`
+      };
+    }
+
+    const sets = [];
+
+    for (let setIndex = 0; setIndex < setRows.length; setIndex += 1) {
+      const row = setRows[setIndex];
+      const repsInput = row.querySelector(".set-reps");
+      const weightInput = row.querySelector(".set-weight");
+      const reps = repsInput ? Number(repsInput.value) : NaN;
+      const weightKg = weightInput ? Number(weightInput.value) : NaN;
+
+      if (!Number.isInteger(reps) || reps < 1) {
+        return {
+          ok: false,
+          message: `${exerciseName} - Serie ${setIndex + 1}: reps invalidas.`
+        };
+      }
+
+      if (!Number.isFinite(weightKg) || weightKg < 0) {
+        return {
+          ok: false,
+          message: `${exerciseName} - Serie ${setIndex + 1}: peso invalido.`
+        };
+      }
+
+      sets.push({
+        reps,
+        weightKg: Number(weightKg.toFixed(2))
+      });
+    }
+
+    return {
+      ok: true,
+      exercise: {
+        exerciseName,
+        sets
+      }
+    };
+  }
+
+  function collectRoutineFromForm() {
+    const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
+    if (cards.length === 0) {
+      return { ok: true, exercises: [] };
+    }
+
+    const exercises = [];
+
+    for (let i = 0; i < cards.length; i += 1) {
+      const result = collectExerciseFromCard(cards[i], i);
+      if (!result.ok) {
+        return result;
+      }
+      exercises.push(result.exercise);
+    }
+
+    return { ok: true, exercises };
+  }
+
+  function renderCalendar() {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    monthLabel.textContent = `${monthNames[month]} ${year}`;
+
+    calendarGrid.innerHTML = "";
+    const gridStartDate = buildStartDate(viewDate);
+    const todayKey = toDateKey(new Date());
+
+    for (let i = 0; i < 42; i += 1) {
+      const cellDate = new Date(gridStartDate);
+      cellDate.setDate(gridStartDate.getDate() + i);
+
+      const dayBtn = document.createElement("button");
+      dayBtn.type = "button";
+      dayBtn.className = "day-button";
+      dayBtn.textContent = cellDate.getDate();
+      const dateKey = toDateKey(cellDate);
+      dayBtn.dataset.date = dateKey;
+
+      if (cellDate.getMonth() !== month) {
+        dayBtn.classList.add("is-outside");
+      }
+
+      if (dateKey === todayKey) {
+        dayBtn.classList.add("is-today");
+      }
+
+      const routine = routinesByDate[dateKey];
+      if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
+        dayBtn.classList.add("has-routine");
+      }
+
+      calendarGrid.appendChild(dayBtn);
+    }
+  }
+
+  function openRoutineModal(dateKey, triggerButton) {
+    selectedDateKey = dateKey;
+    lastTriggerButton = triggerButton || null;
+    routineDateTitle.textContent = formatFullDate(dateKey);
+
+    const existingRoutine = routinesByDate[dateKey];
+    if (existingRoutine) {
+      setState(
+        existingRoutine.updatedAt
+          ? `Rutina cargada (${formatSavedAt(existingRoutine.updatedAt)}).`
+          : "Rutina cargada."
+      );
+      loadRoutineIntoForm(existingRoutine);
+    } else {
+      setState("No hay rutina en este dia. Agrega ejercicios y series.");
+      loadRoutineIntoForm(null);
+    }
+
+    routineModal.classList.add("is-open");
+    routineModal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+  }
+
+  function closeRoutineModal() {
+    routineModal.classList.remove("is-open");
+    routineModal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+
+    if (lastTriggerButton) {
+      lastTriggerButton.focus();
+    }
+  }
+
+  prevMonthBtn.addEventListener("click", () => {
+    viewDate.setMonth(viewDate.getMonth() - 1);
+    renderCalendar();
+  });
+
+  nextMonthBtn.addEventListener("click", () => {
+    viewDate.setMonth(viewDate.getMonth() + 1);
+    renderCalendar();
+  });
+
+  calendarGrid.addEventListener("click", (event) => {
+    const dayButton = event.target.closest(".day-button");
+    if (!dayButton) {
+      return;
+    }
+    openRoutineModal(dayButton.dataset.date, dayButton);
+  });
+
+  addExerciseBtn.addEventListener("click", () => {
+    if (isSaving) {
+      return;
+    }
+    const card = createExerciseCard({}, { readOnly: false });
+    const input = card.querySelector(".exercise-name");
+    if (input) {
+      input.focus();
+    }
+  });
+
+  exercisesList.addEventListener("input", (event) => {
+    const card = event.target.closest(".exercise-card");
+    if (!card) {
+      return;
+    }
+    updateExerciseReadSummary(card);
+  });
+
+  exercisesList.addEventListener("click", (event) => {
+    if (isSaving) {
+      return;
+    }
+
+    const toggleEditButton = event.target.closest(".exercise-edit-toggle");
+    if (toggleEditButton) {
+      const exerciseCard = toggleEditButton.closest(".exercise-card");
+      if (!exerciseCard) {
+        return;
+      }
+
+      if (exerciseCard.classList.contains("is-readonly")) {
+        setExerciseReadMode(exerciseCard, false);
+        const nameInput = exerciseCard.querySelector(".exercise-name");
+        if (nameInput) {
+          nameInput.focus();
+        }
+      } else {
+        const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
+        const cardIndex = cards.indexOf(exerciseCard);
+        const validation = collectExerciseFromCard(exerciseCard, Math.max(cardIndex, 0));
+        if (!validation.ok) {
+          setState(validation.message);
+          return;
+        }
+
+        updateExerciseReadSummary(exerciseCard);
+        setExerciseReadMode(exerciseCard, true);
+      }
+      return;
+    }
+
+    const addSetButton = event.target.closest(".add-set-btn");
+    if (addSetButton) {
+      const exerciseCard = addSetButton.closest(".exercise-card");
+      if (!exerciseCard) {
+        return;
+      }
+      addSetToExercise(exerciseCard);
+      const rows = exerciseCard.querySelectorAll(".set-row");
+      const lastRow = rows[rows.length - 1];
+      if (lastRow) {
+        const repsInput = lastRow.querySelector(".set-reps");
+        if (repsInput) {
+          repsInput.focus();
+        }
+      }
+      return;
+    }
+
+    const removeSetButton = event.target.closest(".set-remove");
+    if (removeSetButton) {
+      const exerciseCard = removeSetButton.closest(".exercise-card");
+      const setRow = removeSetButton.closest(".set-row");
+      if (!exerciseCard || !setRow) {
+        return;
+      }
+      setRow.remove();
+      renumberSetRows(exerciseCard);
+      updateExerciseReadSummary(exerciseCard);
+      return;
+    }
+
+    const removeExerciseButton = event.target.closest(".exercise-remove");
+    if (removeExerciseButton) {
+      const exerciseCard = removeExerciseButton.closest(".exercise-card");
+      if (!exerciseCard) {
+        return;
+      }
+      exerciseCard.remove();
+    }
+  });
+
+  routineForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    if (!selectedDateKey || isSaving) {
+      return;
+    }
+
+    const routineResult = collectRoutineFromForm();
+    if (!routineResult.ok) {
+      setState(routineResult.message);
+      return;
+    }
+
+    setSavingState(true);
+
+    try {
+      if (routineResult.exercises.length === 0) {
+        const deleteResult = await persistence.deleteDay(selectedDateKey);
+        if (!deleteResult.ok) {
+          setState(getErrorMessage(
+            deleteResult,
+            persistence.kind === "supabase"
+              ? "No se pudo eliminar la rutina en Supabase."
+              : "No se pudo eliminar la rutina en local."
+          ));
+          return;
+        }
+
+        delete routinesByDate[selectedDateKey];
+        renderCalendar();
+        setState("Rutina eliminada para este dia.");
+        loadRoutineIntoForm(null);
+        return;
+      }
+
+      const nextRoutine = {
+        exercises: routineResult.exercises,
+        updatedAt: new Date().toISOString()
+      };
+
+      const saveResult = await persistence.saveDay(selectedDateKey, nextRoutine);
+      if (!saveResult.ok) {
+        setState(getErrorMessage(
+          saveResult,
+          persistence.kind === "supabase"
+            ? "No se pudo guardar la rutina en Supabase."
+            : "No se pudo guardar la rutina en local."
+        ));
+        return;
+      }
+
+      routinesByDate[selectedDateKey] = nextRoutine;
+
+      const cards = exercisesList.querySelectorAll(".exercise-card");
+      cards.forEach((card) => {
+        updateExerciseReadSummary(card);
+        setExerciseReadMode(card, true);
+      });
+
+      renderCalendar();
+      setState(persistence.kind === "supabase"
+        ? "Rutina guardada en Supabase."
+        : "Rutina guardada en local.");
+    } finally {
+      setSavingState(false);
+    }
+  });
+
+  closeModalBtn.addEventListener("click", closeRoutineModal);
+
+  routineModal.addEventListener("click", (event) => {
+    if (event.target.hasAttribute("data-close-modal")) {
+      closeRoutineModal();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && routineModal.classList.contains("is-open")) {
+      closeRoutineModal();
+    }
+  });
+})();

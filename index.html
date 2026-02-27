@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" type="image/png" href="icon-192.png">
+
+  <title>FitGym</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <main class="mobile-shell">
+    <header class="calendar-header">
+      <div>
+        <p class="calendar-title">Control de Rutinas</p>
+        <h1 id="monthLabel" class="month-label" aria-live="polite"></h1>
+      </div>
+      <nav class="month-controls" aria-label="Navegacion entre meses">
+        <button id="prevMonth" class="month-btn" type="button" aria-label="Mes anterior">&lsaquo;</button>
+        <button id="nextMonth" class="month-btn" type="button" aria-label="Mes siguiente">&rsaquo;</button>
+      </nav>
+    </header>
+
+    <section class="calendar-card" aria-label="Calendario mensual">
+      <div class="weekdays" id="weekdayLabels"></div>
+      <div class="calendar-grid" id="calendarGrid"></div>
+    </section>
+  </main>
+
+  <div id="routineModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+
+    <section class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="routineDateTitle">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker">Rutina del dia</p>
+          <h2 id="routineDateTitle" class="modal-title"></h2>
+        </div>
+        <button id="closeModal" class="icon-close" type="button" aria-label="Cerrar modal">&times;</button>
+      </header>
+
+      <p id="routineState" class="modal-state" aria-live="polite"></p>
+
+      <form id="routineForm" class="routine-form" novalidate>
+        <div class="exercises-head">
+          <h3 class="exercises-title">Ejercicios</h3>
+          <button id="addExerciseBtn" class="secondary-btn" type="button">+ Agregar ejercicio</button>
+        </div>
+        <div id="exercisesList" class="exercises-list"></div>
+
+        <button class="primary-btn" type="submit">Guardar rutina</button>
+      </form>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
