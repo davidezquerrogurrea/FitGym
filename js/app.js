@@ -161,13 +161,6 @@
     return savedAtFormatter.format(date);
   }
 
-  function formatWeight(value) {
-    if (!Number.isFinite(value)) {
-      return "-";
-    }
-    return Number(value.toFixed(2)).toString();
-  }
-
   function sanitizeDailySteps(rawSteps) {
     if (rawSteps === "" || rawSteps == null) {
       return null;
@@ -589,12 +582,12 @@
     setRow.className = "set-row";
     setRow.innerHTML = `
       <div class="set-label"></div>
-      <label class="set-field">
-        <span class="set-field-label">Reps</span>
+      <label class="set-inline">
+        <span>Reps</span>
         <input class="field-control set-reps" type="number" min="1" step="1" inputmode="numeric" required>
       </label>
-      <label class="set-field">
-        <span class="set-field-label">Peso (kg)</span>
+      <label class="set-inline">
+        <span>Kg</span>
         <input class="field-control set-weight" type="number" min="0" step="0.5" inputmode="decimal" required>
       </label>
       <button class="set-remove" type="button" aria-label="Eliminar serie">&times;</button>
@@ -623,58 +616,6 @@
     });
   }
 
-  function updateExerciseReadSummary(exerciseCard) {
-    const nameInput = exerciseCard.querySelector(".exercise-name");
-    const readName = exerciseCard.querySelector(".exercise-name-read");
-    const readSets = exerciseCard.querySelector(".exercise-read-sets");
-
-    if (!nameInput || !readName || !readSets) {
-      return;
-    }
-
-    const exerciseName = nameInput.value.trim();
-    readName.textContent = exerciseName || "Ejercicio sin nombre";
-
-    const rows = Array.from(exerciseCard.querySelectorAll(".set-row"));
-    if (rows.length === 0) {
-      readSets.innerHTML = `
-        <div class="exercise-read-row">
-          <span>-</span>
-          <strong>Sin series</strong>
-          <strong></strong>
-        </div>
-      `;
-      return;
-    }
-
-    readSets.innerHTML = rows.map((row, index) => {
-      const repsInput = row.querySelector(".set-reps");
-      const weightInput = row.querySelector(".set-weight");
-      const reps = repsInput ? Number(repsInput.value) : NaN;
-      const weightKg = weightInput ? Number(weightInput.value) : NaN;
-      const repsText = Number.isInteger(reps) && reps > 0 ? `${reps} reps` : "Reps -";
-      const weightText = Number.isFinite(weightKg) && weightKg >= 0
-        ? `${formatWeight(weightKg)} kg`
-        : "Peso -";
-
-      return `
-        <div class="exercise-read-row">
-          <span>S${index + 1}</span>
-          <strong>${repsText}</strong>
-          <strong>${weightText}</strong>
-        </div>
-      `;
-    }).join("");
-  }
-
-  function setExerciseReadMode(exerciseCard, isReadOnly) {
-    const toggleBtn = exerciseCard.querySelector(".exercise-edit-toggle");
-    exerciseCard.classList.toggle("is-readonly", isReadOnly);
-    if (toggleBtn) {
-      toggleBtn.textContent = isReadOnly ? "Editar" : "Listo";
-    }
-  }
-
   function addSetToExercise(exerciseCard, setData = {}) {
     const setsContainer = exerciseCard.querySelector(".exercise-sets");
     if (!setsContainer) {
@@ -682,27 +623,20 @@
     }
     setsContainer.appendChild(createSetRow(setData));
     renumberSetRows(exerciseCard);
-    updateExerciseReadSummary(exerciseCard);
   }
 
-  function createExerciseCard(exerciseData = {}, options = {}) {
-    const isReadOnly = Boolean(options.readOnly);
-
+  function createExerciseCard(exerciseData = {}) {
     const card = document.createElement("article");
     card.className = "exercise-card";
     card.innerHTML = `
       <div class="exercise-header">
         <label class="exercise-input-wrap">
-          <span class="exercise-caption">Ejercicio</span>
-          <input class="field-control exercise-name" type="text" maxlength="80" required>
-          <strong class="exercise-name-read"></strong>
+          <input class="field-control exercise-name" type="text" maxlength="80" placeholder="Ejercicio" required>
         </label>
         <div class="exercise-actions">
-          <button class="secondary-btn exercise-edit-toggle" type="button">Listo</button>
           <button class="exercise-remove" type="button">Eliminar</button>
         </div>
       </div>
-      <div class="exercise-read-sets"></div>
       <div class="exercise-sets"></div>
       <button class="secondary-btn add-set-btn" type="button">+ Agregar serie</button>
     `;
@@ -719,9 +653,6 @@
     } else {
       addSetToExercise(card, { reps: 8 });
     }
-
-    updateExerciseReadSummary(card);
-    setExerciseReadMode(card, isReadOnly);
     return card;
   }
 
@@ -738,10 +669,10 @@
 
     if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
       routine.exercises.forEach((exercise) => {
-        createExerciseCard(exercise, { readOnly: true });
+        createExerciseCard(exercise);
       });
     } else {
-      createExerciseCard({}, { readOnly: false });
+      createExerciseCard({});
     }
   }
 
@@ -944,51 +875,15 @@
     if (isSaving) {
       return;
     }
-    const card = createExerciseCard({}, { readOnly: false });
+    const card = createExerciseCard({});
     const input = card.querySelector(".exercise-name");
     if (input) {
       input.focus();
     }
   });
 
-  exercisesList.addEventListener("input", (event) => {
-    const card = event.target.closest(".exercise-card");
-    if (!card) {
-      return;
-    }
-    updateExerciseReadSummary(card);
-  });
-
   exercisesList.addEventListener("click", (event) => {
     if (isSaving) {
-      return;
-    }
-
-    const toggleEditButton = event.target.closest(".exercise-edit-toggle");
-    if (toggleEditButton) {
-      const exerciseCard = toggleEditButton.closest(".exercise-card");
-      if (!exerciseCard) {
-        return;
-      }
-
-      if (exerciseCard.classList.contains("is-readonly")) {
-        setExerciseReadMode(exerciseCard, false);
-        const nameInput = exerciseCard.querySelector(".exercise-name");
-        if (nameInput) {
-          nameInput.focus();
-        }
-      } else {
-        const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
-        const cardIndex = cards.indexOf(exerciseCard);
-        const validation = collectExerciseFromCard(exerciseCard, Math.max(cardIndex, 0));
-        if (!validation.ok) {
-          setState(validation.message);
-          return;
-        }
-
-        updateExerciseReadSummary(exerciseCard);
-        setExerciseReadMode(exerciseCard, true);
-      }
       return;
     }
 
@@ -1019,7 +914,6 @@
       }
       setRow.remove();
       renumberSetRows(exerciseCard);
-      updateExerciseReadSummary(exerciseCard);
       return;
     }
 
@@ -1086,12 +980,6 @@
       }
 
       routinesByDate[selectedDateKey] = nextRoutine;
-
-      const cards = exercisesList.querySelectorAll(".exercise-card");
-      cards.forEach((card) => {
-        updateExerciseReadSummary(card);
-        setExerciseReadMode(card, true);
-      });
 
       renderCalendar();
       setState(persistence.kind === "supabase"
