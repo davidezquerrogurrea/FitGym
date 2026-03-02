@@ -169,46 +169,36 @@ body {
   background: #ffffff;
 }
 
-body.modal-open {
-  overflow: hidden;
+.day-button.is-selected {
+  background: #cfe3ff;
+  color: #123a78;
+  box-shadow: inset 0 0 0 2px #4f8ff7;
 }
 
-.modal {
-  position: fixed;
-  inset: 0;
-  display: none;
-  z-index: 20;
+.day-button.is-selected.is-today {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(44, 123, 229, 0.35), inset 0 0 0 2px #ffffff;
 }
 
-.modal.is-open {
-  display: block;
-}
-
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(12, 22, 39, 0.45);
-}
-
-.modal-sheet {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(94vw, 520px);
-  max-height: 86dvh;
-  overflow: auto;
+.routine-panel {
   background: var(--card-bg);
+  border: 1px solid var(--line);
   border-radius: 20px;
   padding: 12px 12px 14px;
-  box-shadow: 0 16px 34px rgba(13, 24, 43, 0.26);
+  box-shadow: 0 12px 30px rgba(18, 34, 70, 0.08);
+  max-height: 62dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 .modal-header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .modal-kicker {
@@ -222,24 +212,8 @@ body.modal-open {
 
 .modal-title {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1rem;
   line-height: 1.2;
-}
-
-.icon-close {
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--card-bg);
-  font-size: 1.4rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.icon-close:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .modal-state {
@@ -252,6 +226,18 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.header-steps {
+  display: flex;
+  align-items: flex-end;
+}
+
+.steps-input {
+  max-width: 92px;
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 0.76rem;
 }
 
 .exercises-head {
@@ -457,21 +443,67 @@ body.modal-open {
   border-color: #9abbf6;
 }
 
-.primary-btn {
-  margin-top: 6px;
-  width: 100%;
+.floating-save-btn {
+  position: fixed;
+  right: 16px;
+  right: max(16px, calc((100vw - 420px) / 2 + 16px));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
   border: none;
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--accent);
   color: #ffffff;
-  padding: 10px;
-  font-size: 0.86rem;
-  font-weight: 700;
+  box-shadow: 0 14px 26px rgba(35, 83, 156, 0.35);
   cursor: pointer;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 
-.primary-btn:active {
-  transform: scale(0.99);
+.floating-save-btn:hover {
+  box-shadow: 0 18px 30px rgba(35, 83, 156, 0.4);
+}
+
+.floating-save-btn:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+.floating-save-btn:focus-visible {
+  outline: 3px solid #a8c8ff;
+  outline-offset: 2px;
+}
+
+.floating-save-btn:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.save-icon {
+  width: 25px;
+  height: 25px;
+  display: block;
+}
+
+.save-icon path {
+  fill: currentColor;
+}
+
+.floating-save-btn.is-saving .save-icon {
+  animation: save-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes save-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.86);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .exercise-card.is-readonly .exercise-name {

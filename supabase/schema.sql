@@ -3,10 +3,14 @@ create extension if not exists pgcrypto;
 create table if not exists public.workout_days (
   id uuid primary key default gen_random_uuid(),
   session_date date not null,
+  daily_steps int check (daily_steps >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (session_date)
 );
+
+alter table if exists public.workout_days
+  add column if not exists daily_steps int check (daily_steps >= 0);
 
 create table if not exists public.workout_exercises (
   id uuid primary key default gen_random_uuid(),

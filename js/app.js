@@ -4,19 +4,19 @@
   const calendarGrid = document.getElementById("calendarGrid");
   const prevMonthBtn = document.getElementById("prevMonth");
   const nextMonthBtn = document.getElementById("nextMonth");
-  const routineModal = document.getElementById("routineModal");
+  const routinePanel = document.getElementById("routinePanel");
   const routineDateTitle = document.getElementById("routineDateTitle");
   const routineState = document.getElementById("routineState");
   const routineForm = document.getElementById("routineForm");
+  const dailyStepsInput = document.getElementById("dailyStepsInput");
   const addExerciseBtn = document.getElementById("addExerciseBtn");
   const exercisesList = document.getElementById("exercisesList");
-  const closeModalBtn = document.getElementById("closeModal");
   const saveRoutineBtn = routineForm ? routineForm.querySelector("button[type='submit']") : null;
 
   if (
     !monthLabel || !weekdayLabels || !calendarGrid || !prevMonthBtn || !nextMonthBtn ||
-    !routineModal || !routineDateTitle || !routineState || !routineForm || !addExerciseBtn ||
-    !exercisesList || !closeModalBtn || !saveRoutineBtn
+    !routinePanel || !routineDateTitle || !routineState || !routineForm || !addExerciseBtn ||
+    !dailyStepsInput || !exercisesList || !saveRoutineBtn
   ) {
     return;
   }
@@ -48,7 +48,6 @@
   const localAdapter = createLocalAdapter();
   let persistence = createPersistenceAdapter(localAdapter);
   let selectedDateKey = "";
-  let lastTriggerButton = null;
   let isSaving = false;
 
   init();
@@ -56,7 +55,8 @@
   async function init() {
     renderWeekdays();
     await bootstrapRoutines();
-    renderCalendar();
+    selectedDateKey = toDateKey(new Date());
+    selectRoutineDay(selectedDateKey);
   }
 
   async function bootstrapRoutines() {
@@ -100,7 +100,10 @@
     isSaving = busy;
     saveRoutineBtn.disabled = busy;
     addExerciseBtn.disabled = busy;
-    saveRoutineBtn.textContent = busy ? "Guardando..." : "Guardar rutina";
+    dailyStepsInput.disabled = busy;
+    saveRoutineBtn.classList.toggle("is-saving", busy);
+    saveRoutineBtn.setAttribute("aria-label", busy ? "Guardando datos" : "Guardar datos");
+    saveRoutineBtn.setAttribute("title", busy ? "Guardando datos" : "Guardar datos");
   }
 
   function replaceRoutines(nextMap) {
@@ -163,6 +166,19 @@
       return "-";
     }
     return Number(value.toFixed(2)).toString();
+  }
+
+  function sanitizeDailySteps(rawSteps) {
+    if (rawSteps === "" || rawSteps == null) {
+      return null;
+    }
+
+    const steps = Number(rawSteps);
+    if (!Number.isInteger(steps) || steps < 0) {
+      return null;
+    }
+
+    return steps;
   }
 
   function sanitizeSetEntry(rawSet) {
@@ -232,6 +248,13 @@
     }
 
     const exercises = [];
+    const dailySteps = sanitizeDailySteps(
+      rawEntry.dailySteps != null
+        ? rawEntry.dailySteps
+        : rawEntry.daily_steps != null
+          ? rawEntry.daily_steps
+          : rawEntry.steps
+    );
 
     if (Array.isArray(rawEntry.exercises)) {
       rawEntry.exercises.forEach((rawExercise) => {
@@ -247,14 +270,25 @@
       }
     }
 
-    if (exercises.length === 0) {
+    if (exercises.length === 0 && dailySteps == null) {
       return null;
     }
 
     return {
       exercises,
+      dailySteps,
       updatedAt: typeof rawEntry.updatedAt === "string" ? rawEntry.updatedAt : null
     };
+  }
+
+  function hasDayContent(entry) {
+    if (!entry || typeof entry !== "object") {
+      return false;
+    }
+
+    const hasExercises = Array.isArray(entry.exercises) && entry.exercises.length > 0;
+    const hasSteps = Number.isInteger(entry.dailySteps) && entry.dailySteps >= 0;
+    return hasExercises || hasSteps;
   }
 
   function parseLocalMap(raw) {
@@ -332,7 +366,7 @@
       async loadAll() {
         const daysRes = await client
           .from("workout_days")
-          .select("id, session_date, updated_at")
+          .select("id, session_date, updated_at, daily_steps")
           .order("session_date", { ascending: true });
 
         if (daysRes.error) {
@@ -409,14 +443,16 @@
         days.forEach((dayRow) => {
           const dayExercises = exercisesByDayId.get(dayRow.id) || [];
           dayExercises.sort((a, b) => a.exerciseOrder - b.exerciseOrder);
+          const dailySteps = sanitizeDailySteps(dayRow.daily_steps);
           const cleaned = dayExercises.map((exercise) => ({
             exerciseName: exercise.exerciseName,
             sets: exercise.sets
           }));
 
-          if (cleaned.length > 0) {
+          if (cleaned.length > 0 || dailySteps != null) {
             map[dayRow.session_date] = {
               exercises: cleaned,
+              dailySteps,
               updatedAt: dayRow.updated_at || null
             };
           }
@@ -446,6 +482,7 @@
             .from("workout_days")
             .insert({
               session_date: dateKey,
+              daily_steps: routine.dailySteps,
               updated_at: routine.updatedAt || new Date().toISOString()
             })
             .select("id")
@@ -459,7 +496,10 @@
         } else {
           const updateDayRes = await client
             .from("workout_days")
-            .update({ updated_at: routine.updatedAt || new Date().toISOString() })
+            .update({
+              daily_steps: routine.dailySteps,
+              updated_at: routine.updatedAt || new Date().toISOString()
+            })
             .eq("id", dayId);
 
           if (updateDayRes.error) {
@@ -474,6 +514,10 @@
 
         if (deleteExercisesRes.error) {
           return { ok: false, error: deleteExercisesRes.error };
+        }
+
+        if (!Array.isArray(routine.exercises) || routine.exercises.length === 0) {
+          return { ok: true };
         }
 
         const exercisePayload = routine.exercises.map((exercise, index) => ({
@@ -686,6 +730,10 @@
   }
 
   function loadRoutineIntoForm(routine) {
+    dailyStepsInput.value = routine && Number.isInteger(routine.dailySteps)
+      ? String(routine.dailySteps)
+      : "";
+
     clearExerciseCards();
 
     if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
@@ -754,15 +802,53 @@
     };
   }
 
+  function isExerciseCardEmpty(card) {
+    const nameInput = card.querySelector(".exercise-name");
+    const exerciseName = nameInput ? nameInput.value.trim() : "";
+    if (exerciseName) {
+      return false;
+    }
+
+    const weightInputs = Array.from(card.querySelectorAll(".set-weight"));
+    const hasAnyWeight = weightInputs.some((input) => input.value.trim() !== "");
+    return !hasAnyWeight;
+  }
+
+  function collectDailyStepsFromForm() {
+    const rawSteps = dailyStepsInput.value.trim();
+    if (!rawSteps) {
+      return { ok: true, dailySteps: null };
+    }
+
+    const dailySteps = sanitizeDailySteps(rawSteps);
+    if (dailySteps == null) {
+      return {
+        ok: false,
+        message: "Pasos diarios: escribe un numero entero valido."
+      };
+    }
+
+    return { ok: true, dailySteps };
+  }
+
   function collectRoutineFromForm() {
+    const stepsResult = collectDailyStepsFromForm();
+    if (!stepsResult.ok) {
+      return stepsResult;
+    }
+
     const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
     if (cards.length === 0) {
-      return { ok: true, exercises: [] };
+      return { ok: true, exercises: [], dailySteps: stepsResult.dailySteps };
     }
 
     const exercises = [];
 
     for (let i = 0; i < cards.length; i += 1) {
+      if (isExerciseCardEmpty(cards[i])) {
+        continue;
+      }
+
       const result = collectExerciseFromCard(cards[i], i);
       if (!result.ok) {
         return result;
@@ -770,7 +856,7 @@
       exercises.push(result.exercise);
     }
 
-    return { ok: true, exercises };
+    return { ok: true, exercises, dailySteps: stepsResult.dailySteps };
   }
 
   function renderCalendar() {
@@ -801,8 +887,12 @@
         dayBtn.classList.add("is-today");
       }
 
+      if (dateKey === selectedDateKey) {
+        dayBtn.classList.add("is-selected");
+      }
+
       const routine = routinesByDate[dateKey];
-      if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
+      if (hasDayContent(routine)) {
         dayBtn.classList.add("has-routine");
       }
 
@@ -810,37 +900,26 @@
     }
   }
 
-  function openRoutineModal(dateKey, triggerButton) {
+  function selectRoutineDay(dateKey) {
+    if (!dateKey) {
+      return;
+    }
     selectedDateKey = dateKey;
-    lastTriggerButton = triggerButton || null;
     routineDateTitle.textContent = formatFullDate(dateKey);
 
     const existingRoutine = routinesByDate[dateKey];
     if (existingRoutine) {
       setState(
         existingRoutine.updatedAt
-          ? `Rutina cargada (${formatSavedAt(existingRoutine.updatedAt)}).`
-          : "Rutina cargada."
+          ? `Datos cargados (${formatSavedAt(existingRoutine.updatedAt)}).`
+          : "Datos cargados."
       );
       loadRoutineIntoForm(existingRoutine);
     } else {
-      setState("No hay rutina en este dia. Agrega ejercicios y series.");
+      setState("No hay datos en este dia. Agrega pasos o ejercicios.");
       loadRoutineIntoForm(null);
     }
-
-    routineModal.classList.add("is-open");
-    routineModal.setAttribute("aria-hidden", "false");
-    document.body.classList.add("modal-open");
-  }
-
-  function closeRoutineModal() {
-    routineModal.classList.remove("is-open");
-    routineModal.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("modal-open");
-
-    if (lastTriggerButton) {
-      lastTriggerButton.focus();
-    }
+    renderCalendar();
   }
 
   prevMonthBtn.addEventListener("click", () => {
@@ -858,7 +937,7 @@
     if (!dayButton) {
       return;
     }
-    openRoutineModal(dayButton.dataset.date, dayButton);
+    selectRoutineDay(dayButton.dataset.date);
   });
 
   addExerciseBtn.addEventListener("click", () => {
@@ -970,27 +1049,28 @@
     setSavingState(true);
 
     try {
-      if (routineResult.exercises.length === 0) {
+      if (routineResult.exercises.length === 0 && routineResult.dailySteps == null) {
         const deleteResult = await persistence.deleteDay(selectedDateKey);
         if (!deleteResult.ok) {
           setState(getErrorMessage(
             deleteResult,
             persistence.kind === "supabase"
-              ? "No se pudo eliminar la rutina en Supabase."
-              : "No se pudo eliminar la rutina en local."
+              ? "No se pudieron eliminar los datos del dia en Supabase."
+              : "No se pudieron eliminar los datos del dia en local."
           ));
           return;
         }
 
         delete routinesByDate[selectedDateKey];
         renderCalendar();
-        setState("Rutina eliminada para este dia.");
+        setState("Datos eliminados para este dia.");
         loadRoutineIntoForm(null);
         return;
       }
 
       const nextRoutine = {
         exercises: routineResult.exercises,
+        dailySteps: routineResult.dailySteps,
         updatedAt: new Date().toISOString()
       };
 
@@ -999,8 +1079,8 @@
         setState(getErrorMessage(
           saveResult,
           persistence.kind === "supabase"
-            ? "No se pudo guardar la rutina en Supabase."
-            : "No se pudo guardar la rutina en local."
+            ? "No se pudieron guardar los datos del dia en Supabase."
+            : "No se pudieron guardar los datos del dia en local."
         ));
         return;
       }
@@ -1015,24 +1095,11 @@
 
       renderCalendar();
       setState(persistence.kind === "supabase"
-        ? "Rutina guardada en Supabase."
-        : "Rutina guardada en local.");
+        ? "Datos guardados en Supabase."
+        : "Datos guardados en local.");
     } finally {
       setSavingState(false);
     }
   });
 
-  closeModalBtn.addEventListener("click", closeRoutineModal);
-
-  routineModal.addEventListener("click", (event) => {
-    if (event.target.hasAttribute("data-close-modal")) {
-      closeRoutineModal();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && routineModal.classList.contains("is-open")) {
-      closeRoutineModal();
-    }
-  });
 })();

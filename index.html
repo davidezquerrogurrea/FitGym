@@ -27,18 +27,22 @@
       <div class="weekdays" id="weekdayLabels"></div>
       <div class="calendar-grid" id="calendarGrid"></div>
     </section>
-  </main>
-
-  <div id="routineModal" class="modal" aria-hidden="true">
-    <div class="modal-backdrop" data-close-modal></div>
-
-    <section class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="routineDateTitle">
+    <section id="routinePanel" class="routine-panel" aria-labelledby="routineDateTitle">
       <header class="modal-header">
         <div>
           <p class="modal-kicker">Rutina del dia</p>
           <h2 id="routineDateTitle" class="modal-title"></h2>
         </div>
-        <button id="closeModal" class="icon-close" type="button" aria-label="Cerrar modal">&times;</button>
+        <div class="header-steps" aria-label="Pasos diarios">
+          <input
+            id="dailyStepsInput"
+            class="field-control steps-input"
+            type="number"
+            min="0"
+            step="1"
+            inputmode="numeric"
+            aria-label="Pasos diarios" placeholder="Pasos">
+        </div>
       </header>
 
       <p id="routineState" class="modal-state" aria-live="polite"></p>
@@ -50,10 +54,18 @@
         </div>
         <div id="exercisesList" class="exercises-list"></div>
 
-        <button class="primary-btn" type="submit">Guardar rutina</button>
+        <button
+          class="floating-save-btn"
+          type="submit"
+          aria-label="Guardar datos"
+          title="Guardar datos">
+          <svg class="save-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 3h11l3 3v15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v15h12V6.83L15.17 5H15v4a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5zm3 0v3h4V5zm0 9h6v4H9z"/>
+          </svg>
+        </button>
       </form>
     </section>
-  </div>
+  </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/supabase-config.js"></script>
