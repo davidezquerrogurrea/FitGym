@@ -54,6 +54,36 @@
         <p id="routineState" class="modal-state" aria-live="polite"></p>
 
         <form id="routineForm" class="routine-form" novalidate>
+          <section class="classification-group" aria-label="Clasificacion de rutina">
+            <h3 class="classification-title">Tipo de rutina</h3>
+            <div id="classificationList" class="classification-list">
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="pecho">
+                <span>Pecho</span>
+              </label>
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="espalda">
+                <span>Espalda</span>
+              </label>
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="triceps">
+                <span>Triceps</span>
+              </label>
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="biceps">
+                <span>Biceps</span>
+              </label>
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="pierna">
+                <span>Pierna</span>
+              </label>
+              <label class="classification-chip">
+                <input class="classification-input" type="checkbox" value="hombro">
+                <span>Hombro</span>
+              </label>
+            </div>
+          </section>
+
           <div class="exercises-head">
             <h3 class="exercises-title">Ejercicios</h3>
             <button id="addExerciseBtn" class="secondary-btn" type="button">+ Agregar ejercicio</button>

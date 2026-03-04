@@ -10,13 +10,17 @@
   const routineForm = document.getElementById("routineForm");
   const dailyStepsInput = document.getElementById("dailyStepsInput");
   const addExerciseBtn = document.getElementById("addExerciseBtn");
+  const classificationList = document.getElementById("classificationList");
   const exercisesList = document.getElementById("exercisesList");
   const saveRoutineBtn = routineForm ? routineForm.querySelector("button[type='submit']") : null;
+  const classificationInputs = classificationList
+    ? Array.from(classificationList.querySelectorAll(".classification-input"))
+    : [];
 
   if (
     !monthLabel || !weekdayLabels || !calendarGrid || !prevMonthBtn || !nextMonthBtn ||
     !routinePanel || !routineDateTitle || !routineState || !routineForm || !addExerciseBtn ||
-    !dailyStepsInput || !exercisesList || !saveRoutineBtn
+    !dailyStepsInput || !classificationList || !exercisesList || !saveRoutineBtn
   ) {
     return;
   }
@@ -27,6 +31,23 @@
   ];
   const weekdayNames = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
   const localStorageKey = "fitgym_routines_v1";
+  const routineClassifications = [
+    { key: "pecho", label: "Pecho", color: "#ef5a5a" },
+    { key: "espalda", label: "Espalda", color: "#4f86f7" },
+    { key: "triceps", label: "Triceps", color: "#f38c4a" },
+    { key: "biceps", label: "Biceps", color: "#f0c94a" },
+    { key: "pierna", label: "Pierna", color: "#4ad18a" },
+    { key: "hombro", label: "Hombro", color: "#b787ff" }
+  ];
+  const validRoutineClassifications = new Set(
+    routineClassifications.map((classification) => classification.key)
+  );
+  const classificationLabelByKey = {};
+  const classificationColorByKey = {};
+  routineClassifications.forEach((classification) => {
+    classificationLabelByKey[classification.key] = classification.label;
+    classificationColorByKey[classification.key] = classification.color;
+  });
   const fullDateFormatter = new Intl.DateTimeFormat("es-ES", {
     weekday: "long",
     day: "numeric",
@@ -103,6 +124,9 @@
     saveRoutineBtn.disabled = busy;
     addExerciseBtn.disabled = busy;
     dailyStepsInput.disabled = busy;
+    classificationInputs.forEach((input) => {
+      input.disabled = busy;
+    });
     saveRoutineBtn.classList.toggle("is-saving", busy);
     saveRoutineBtn.setAttribute("aria-label", busy ? "Guardando datos" : "Guardar datos");
     saveRoutineBtn.setAttribute("title", busy ? "Guardando datos" : "Guardar datos");
@@ -252,6 +276,66 @@
     };
   }
 
+  function sanitizeClassificationValue(rawValue) {
+    if (typeof rawValue !== "string") {
+      return "";
+    }
+
+    const normalized = rawValue.trim().toLowerCase();
+    if (!validRoutineClassifications.has(normalized)) {
+      return "";
+    }
+    return normalized;
+  }
+
+  function sanitizeClassifications(rawClassifications) {
+    const values = Array.isArray(rawClassifications)
+      ? rawClassifications
+      : typeof rawClassifications === "string"
+        ? rawClassifications.split(/[,\s;/|]+/)
+        : [];
+
+    if (values.length === 0) {
+      return [];
+    }
+
+    const seen = new Set();
+    const cleaned = [];
+    values.forEach((rawValue) => {
+      const value = sanitizeClassificationValue(rawValue);
+      if (value && !seen.has(value)) {
+        seen.add(value);
+        cleaned.push(value);
+      }
+    });
+    return cleaned;
+  }
+
+  function getRoutineClassifications(entry) {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    return sanitizeClassifications(entry.classifications);
+  }
+
+  function getClassificationLabel(classification) {
+    return classificationLabelByKey[classification] || classification;
+  }
+
+  function getClassificationColor(classification) {
+    return classificationColorByKey[classification] || "#63d0b7";
+  }
+
+  function isMissingSupabaseColumnError(error, columnName) {
+    const message = error && typeof error.message === "string"
+      ? error.message.toLowerCase()
+      : "";
+    const missingColumn =
+      message.includes("does not exist") ||
+      message.includes("schema cache");
+    return missingColumn && message.includes(columnName.toLowerCase());
+  }
+
   function sanitizeRoutineEntry(rawEntry) {
     if (!rawEntry || typeof rawEntry !== "object") {
       return null;
@@ -264,6 +348,13 @@
         : rawEntry.daily_steps != null
           ? rawEntry.daily_steps
           : rawEntry.steps
+    );
+    const classifications = sanitizeClassifications(
+      rawEntry.classifications != null
+        ? rawEntry.classifications
+        : rawEntry.classification != null
+          ? rawEntry.classification
+          : rawEntry.types
     );
 
     if (Array.isArray(rawEntry.exercises)) {
@@ -280,14 +371,19 @@
       }
     }
 
-    if (exercises.length === 0 && dailySteps == null) {
+    if (exercises.length === 0 && dailySteps == null && classifications.length === 0) {
       return null;
     }
 
     return {
       exercises,
       dailySteps,
-      updatedAt: typeof rawEntry.updatedAt === "string" ? rawEntry.updatedAt : null
+      classifications,
+      updatedAt: typeof rawEntry.updatedAt === "string"
+        ? rawEntry.updatedAt
+        : typeof rawEntry.updated_at === "string"
+          ? rawEntry.updated_at
+          : null
     };
   }
 
@@ -298,7 +394,8 @@
 
     const hasExercises = Array.isArray(entry.exercises) && entry.exercises.length > 0;
     const hasSteps = Number.isInteger(entry.dailySteps) && entry.dailySteps >= 0;
-    return hasExercises || hasSteps;
+    const hasClassifications = getRoutineClassifications(entry).length > 0;
+    return hasExercises || hasSteps || hasClassifications;
   }
 
   function parseLocalMap(raw) {
@@ -370,14 +467,35 @@
   }
 
   function createSupabaseAdapter(client) {
+    let supportsClassificationsColumn = true;
+
+    function buildDayPayload(routine) {
+      const payload = {
+        daily_steps: routine.dailySteps,
+        updated_at: routine.updatedAt || new Date().toISOString()
+      };
+      if (supportsClassificationsColumn) {
+        payload.classifications = sanitizeClassifications(routine.classifications);
+      }
+      return payload;
+    }
+
     return {
       kind: "supabase",
 
       async loadAll() {
-        const daysRes = await client
+        let daysRes = await client
           .from("workout_days")
-          .select("id, session_date, updated_at, daily_steps")
+          .select("id, session_date, updated_at, daily_steps, classifications")
           .order("session_date", { ascending: true });
+
+        if (daysRes.error && isMissingSupabaseColumnError(daysRes.error, "classifications")) {
+          supportsClassificationsColumn = false;
+          daysRes = await client
+            .from("workout_days")
+            .select("id, session_date, updated_at, daily_steps")
+            .order("session_date", { ascending: true });
+        }
 
         if (daysRes.error) {
           return { ok: false, error: daysRes.error };
@@ -454,15 +572,19 @@
           const dayExercises = exercisesByDayId.get(dayRow.id) || [];
           dayExercises.sort((a, b) => a.exerciseOrder - b.exerciseOrder);
           const dailySteps = sanitizeDailySteps(dayRow.daily_steps);
+          const classifications = supportsClassificationsColumn
+            ? sanitizeClassifications(dayRow.classifications)
+            : [];
           const cleaned = dayExercises.map((exercise) => ({
             exerciseName: exercise.exerciseName,
             sets: exercise.sets
           }));
 
-          if (cleaned.length > 0 || dailySteps != null) {
+          if (cleaned.length > 0 || dailySteps != null || classifications.length > 0) {
             map[dayRow.session_date] = {
               exercises: cleaned,
               dailySteps,
+              classifications,
               updatedAt: dayRow.updated_at || null
             };
           }
@@ -488,15 +610,30 @@
           : null;
 
         if (!dayId) {
-          const insertDayRes = await client
+          let insertDayRes = await client
             .from("workout_days")
             .insert({
               session_date: dateKey,
-              daily_steps: routine.dailySteps,
-              updated_at: routine.updatedAt || new Date().toISOString()
+              ...buildDayPayload(routine)
             })
             .select("id")
             .single();
+
+          if (
+            insertDayRes.error &&
+            supportsClassificationsColumn &&
+            isMissingSupabaseColumnError(insertDayRes.error, "classifications")
+          ) {
+            supportsClassificationsColumn = false;
+            insertDayRes = await client
+              .from("workout_days")
+              .insert({
+                session_date: dateKey,
+                ...buildDayPayload(routine)
+              })
+              .select("id")
+              .single();
+          }
 
           if (insertDayRes.error || !insertDayRes.data) {
             return { ok: false, error: insertDayRes.error || new Error("No se pudo crear el dia.") };
@@ -504,13 +641,22 @@
 
           dayId = insertDayRes.data.id;
         } else {
-          const updateDayRes = await client
+          let updateDayRes = await client
             .from("workout_days")
-            .update({
-              daily_steps: routine.dailySteps,
-              updated_at: routine.updatedAt || new Date().toISOString()
-            })
+            .update(buildDayPayload(routine))
             .eq("id", dayId);
+
+          if (
+            updateDayRes.error &&
+            supportsClassificationsColumn &&
+            isMissingSupabaseColumnError(updateDayRes.error, "classifications")
+          ) {
+            supportsClassificationsColumn = false;
+            updateDayRes = await client
+              .from("workout_days")
+              .update(buildDayPayload(routine))
+              .eq("id", dayId);
+          }
 
           if (updateDayRes.error) {
             return { ok: false, error: updateDayRes.error };
@@ -677,7 +823,15 @@
     exercisesList.innerHTML = "";
   }
 
+  function loadClassificationsIntoForm(routine) {
+    const selected = new Set(getRoutineClassifications(routine));
+    classificationInputs.forEach((input) => {
+      input.checked = selected.has(input.value);
+    });
+  }
+
   function loadRoutineIntoForm(routine) {
+    loadClassificationsIntoForm(routine);
     dailyStepsInput.value = routine && Number.isInteger(routine.dailySteps)
       ? String(routine.dailySteps)
       : "";
@@ -779,15 +933,24 @@
     return { ok: true, dailySteps };
   }
 
+  function collectClassificationsFromForm() {
+    return sanitizeClassifications(
+      classificationInputs
+        .filter((input) => input.checked)
+        .map((input) => input.value)
+    );
+  }
+
   function collectRoutineFromForm() {
     const stepsResult = collectDailyStepsFromForm();
     if (!stepsResult.ok) {
       return stepsResult;
     }
+    const classifications = collectClassificationsFromForm();
 
     const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
     if (cards.length === 0) {
-      return { ok: true, exercises: [], dailySteps: stepsResult.dailySteps };
+      return { ok: true, exercises: [], dailySteps: stepsResult.dailySteps, classifications };
     }
 
     const exercises = [];
@@ -804,7 +967,30 @@
       exercises.push(result.exercise);
     }
 
-    return { ok: true, exercises, dailySteps: stepsResult.dailySteps };
+    return { ok: true, exercises, dailySteps: stepsResult.dailySteps, classifications };
+  }
+
+  function appendRoutineMarkers(dayBtn, routine) {
+    const markerWrap = document.createElement("span");
+    markerWrap.className = "day-markers";
+    markerWrap.setAttribute("aria-hidden", "true");
+
+    const classifications = getRoutineClassifications(routine);
+    if (classifications.length === 0) {
+      const marker = document.createElement("span");
+      marker.className = "day-marker is-default";
+      markerWrap.appendChild(marker);
+    } else {
+      classifications.forEach((classification) => {
+        const marker = document.createElement("span");
+        marker.className = "day-marker";
+        marker.style.backgroundColor = getClassificationColor(classification);
+        marker.title = getClassificationLabel(classification);
+        markerWrap.appendChild(marker);
+      });
+    }
+
+    dayBtn.appendChild(markerWrap);
   }
 
   function renderCalendar() {
@@ -823,7 +1009,10 @@
       const dayBtn = document.createElement("button");
       dayBtn.type = "button";
       dayBtn.className = "day-button";
-      dayBtn.textContent = cellDate.getDate();
+      const dayNumber = document.createElement("span");
+      dayNumber.className = "day-number";
+      dayNumber.textContent = String(cellDate.getDate());
+      dayBtn.appendChild(dayNumber);
       const dateKey = toDateKey(cellDate);
       dayBtn.dataset.date = dateKey;
 
@@ -842,6 +1031,7 @@
       const routine = routinesByDate[dateKey];
       if (hasDayContent(routine)) {
         dayBtn.classList.add("has-routine");
+        appendRoutineMarkers(dayBtn, routine);
       }
 
       calendarGrid.appendChild(dayBtn);
@@ -865,7 +1055,7 @@
       );
       loadRoutineIntoForm(existingRoutine);
     } else {
-      setState("No hay datos en este dia. Agrega pasos o ejercicios.");
+      setState("No hay datos en este dia. Agrega clasificacion, pasos o ejercicios.");
       loadRoutineIntoForm(null);
     }
     renderCalendar();
@@ -961,7 +1151,11 @@
     setSavingState(true);
 
     try {
-      if (routineResult.exercises.length === 0 && routineResult.dailySteps == null) {
+      if (
+        routineResult.exercises.length === 0 &&
+        routineResult.dailySteps == null &&
+        routineResult.classifications.length === 0
+      ) {
         const deleteResult = await persistence.deleteDay(selectedDateKey);
         if (!deleteResult.ok) {
           setState(getErrorMessage(
@@ -983,6 +1177,7 @@
       const nextRoutine = {
         exercises: routineResult.exercises,
         dailySteps: routineResult.dailySteps,
+        classifications: routineResult.classifications,
         updatedAt: new Date().toISOString()
       };
 
