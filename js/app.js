@@ -55,7 +55,9 @@
   async function init() {
     renderWeekdays();
     await bootstrapRoutines();
-    selectedDateKey = toDateKey(new Date());
+    selectedDateKey = getInitialDateFromQuery() || toDateKey(new Date());
+    const selectedDate = toDateFromKey(selectedDateKey);
+    viewDate.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
     selectRoutineDay(selectedDateKey);
   }
 
@@ -140,6 +142,21 @@
   function toDateFromKey(dateKey) {
     const [year, month, day] = dateKey.split("-").map(Number);
     return new Date(year, month - 1, day, 12, 0, 0);
+  }
+
+  function getInitialDateFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const rawDate = params.get("date");
+    if (!rawDate || !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      return "";
+    }
+
+    const date = toDateFromKey(rawDate);
+    if (Number.isNaN(date.getTime()) || toDateKey(date) !== rawDate) {
+      return "";
+    }
+
+    return rawDate;
   }
 
   function capitalizeFirst(text) {
@@ -829,6 +846,7 @@
 
       calendarGrid.appendChild(dayBtn);
     }
+
   }
 
   function selectRoutineDay(dateKey) {

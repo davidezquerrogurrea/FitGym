@@ -12,6 +12,11 @@
 </head>
 <body>
   <main class="mobile-shell">
+    <nav class="view-tabs" aria-label="Navegacion entre secciones">
+      <a class="view-tab is-active" href="index.html" aria-current="page">Rutina</a>
+      <a class="view-tab" href="steps.html">Pasos</a>
+    </nav>
+
     <header class="calendar-header">
       <div>
         <p class="calendar-title">Control de Rutinas</p>
@@ -23,47 +28,49 @@
       </nav>
     </header>
 
-    <section class="calendar-card" aria-label="Calendario mensual">
-      <div class="weekdays" id="weekdayLabels"></div>
-      <div class="calendar-grid" id="calendarGrid"></div>
-    </section>
-    <section id="routinePanel" class="routine-panel" aria-labelledby="routineDateTitle">
-      <header class="modal-header">
-        <div>
-          <p class="modal-kicker">Rutina del dia</p>
-          <h2 id="routineDateTitle" class="modal-title"></h2>
-        </div>
-        <div class="header-steps" aria-label="Pasos diarios">
-          <input
-            id="dailyStepsInput"
-            class="field-control steps-input"
-            type="number"
-            min="0"
-            step="1"
-            inputmode="numeric"
-            aria-label="Pasos diarios" placeholder="Pasos">
-        </div>
-      </header>
+    <section class="app-view">
+      <section class="calendar-card" aria-label="Calendario mensual">
+        <div class="weekdays" id="weekdayLabels"></div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </section>
+      <section id="routinePanel" class="routine-panel" aria-labelledby="routineDateTitle">
+        <header class="modal-header">
+          <div>
+            <p class="modal-kicker">Rutina del dia</p>
+            <h2 id="routineDateTitle" class="modal-title"></h2>
+          </div>
+          <div class="header-steps" aria-label="Pasos diarios">
+            <input
+              id="dailyStepsInput"
+              class="field-control steps-input"
+              type="number"
+              min="0"
+              step="1"
+              inputmode="numeric"
+              aria-label="Pasos diarios" placeholder="Pasos">
+          </div>
+        </header>
 
-      <p id="routineState" class="modal-state" aria-live="polite"></p>
+        <p id="routineState" class="modal-state" aria-live="polite"></p>
 
-      <form id="routineForm" class="routine-form" novalidate>
-        <div class="exercises-head">
-          <h3 class="exercises-title">Ejercicios</h3>
-          <button id="addExerciseBtn" class="secondary-btn" type="button">+ Agregar ejercicio</button>
-        </div>
-        <div id="exercisesList" class="exercises-list"></div>
+        <form id="routineForm" class="routine-form" novalidate>
+          <div class="exercises-head">
+            <h3 class="exercises-title">Ejercicios</h3>
+            <button id="addExerciseBtn" class="secondary-btn" type="button">+ Agregar ejercicio</button>
+          </div>
+          <div id="exercisesList" class="exercises-list"></div>
 
-        <button
-          class="floating-save-btn"
-          type="submit"
-          aria-label="Guardar datos"
-          title="Guardar datos">
-          <svg class="save-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 3h11l3 3v15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v15h12V6.83L15.17 5H15v4a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5zm3 0v3h4V5zm0 9h6v4H9z"/>
-          </svg>
-        </button>
-      </form>
+          <button
+            class="floating-save-btn"
+            type="submit"
+            aria-label="Guardar datos"
+            title="Guardar datos">
+            <svg class="save-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 3h11l3 3v15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v15h12V6.83L15.17 5H15v4a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5zm3 0v3h4V5zm0 9h6v4H9z"/>
+            </svg>
+          </button>
+        </form>
+      </section>
     </section>
   </main>
 

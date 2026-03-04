@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" type="image/png" href="icon-192.png">
+
+  <title>FitGym - Pasos</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <main class="mobile-shell">
+    <nav class="view-tabs" aria-label="Navegacion entre secciones">
+      <a class="view-tab" href="index.html">Rutina</a>
+      <a class="view-tab is-active" href="steps.html" aria-current="page">Pasos</a>
+    </nav>
+
+    <header class="calendar-header">
+      <div>
+        <p class="calendar-title">Pasos Mensuales</p>
+        <h1 id="monthLabel" class="month-label" aria-live="polite"></h1>
+      </div>
+      <nav class="month-controls" aria-label="Navegacion entre meses">
+        <button id="prevMonth" class="month-btn" type="button" aria-label="Mes anterior">&lsaquo;</button>
+        <button id="nextMonth" class="month-btn" type="button" aria-label="Mes siguiente">&rsaquo;</button>
+      </nav>
+    </header>
+
+    <section class="steps-panel" aria-labelledby="stepsMonthTitle">
+      <header class="modal-header steps-header">
+        <div>
+          <p class="modal-kicker">Resumen del mes</p>
+          <h2 id="stepsMonthTitle" class="modal-title"></h2>
+        </div>
+      </header>
+
+      <div class="steps-stats">
+        <article class="steps-stat-card">
+          <p class="steps-stat-label">Total</p>
+          <p id="stepsTotalValue" class="steps-stat-value">0</p>
+        </article>
+        <article class="steps-stat-card">
+          <p class="steps-stat-label">Media / dia</p>
+          <p id="stepsAverageValue" class="steps-stat-value">0</p>
+        </article>
+        <article class="steps-stat-card">
+          <p class="steps-stat-label">Mejor dia</p>
+          <p id="stepsBestValue" class="steps-stat-value">-</p>
+        </article>
+      </div>
+
+      <div class="steps-chart-card">
+        <div id="stepsBars" class="steps-bars" role="img" aria-label="Grafica mensual de pasos"></div>
+        <div class="steps-axis" aria-hidden="true">
+          <span>1</span>
+          <span id="stepsAxisMid">15</span>
+          <span id="stepsAxisEnd">30</span>
+        </div>
+      </div>
+
+      <p id="stepsState" class="modal-state" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/steps.js"></script>
+</body>
+</html>
