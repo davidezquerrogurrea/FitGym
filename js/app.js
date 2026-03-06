@@ -398,6 +398,13 @@
     return hasExercises || hasSteps || hasClassifications;
   }
 
+  function getFirstRoutineDateKey() {
+    const routineDates = Object.keys(routinesByDate)
+      .filter((dateKey) => hasDayContent(routinesByDate[dateKey]))
+      .sort();
+    return routineDates.length > 0 ? routineDates[0] : "";
+  }
+
   function parseLocalMap(raw) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       return {};
@@ -1001,6 +1008,7 @@
     calendarGrid.innerHTML = "";
     const gridStartDate = buildStartDate(viewDate);
     const todayKey = toDateKey(new Date());
+    const firstRoutineDateKey = getFirstRoutineDateKey();
 
     for (let i = 0; i < 42; i += 1) {
       const cellDate = new Date(gridStartDate);
@@ -1029,9 +1037,16 @@
       }
 
       const routine = routinesByDate[dateKey];
-      if (hasDayContent(routine)) {
+      const hasRoutine = hasDayContent(routine);
+      if (hasRoutine) {
         dayBtn.classList.add("has-routine");
         appendRoutineMarkers(dayBtn, routine);
+      } else if (
+        firstRoutineDateKey &&
+        dateKey >= firstRoutineDateKey &&
+        dateKey <= todayKey
+      ) {
+        dayBtn.classList.add("is-missing-routine");
       }
 
       calendarGrid.appendChild(dayBtn);
