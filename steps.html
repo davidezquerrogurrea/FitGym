@@ -60,6 +60,33 @@
         </div>
       </div>
 
+      <section class="steps-entry-card" aria-labelledby="stepsEntryDateTitle">
+        <header class="modal-header">
+          <div>
+            <p class="modal-kicker">Registro diario</p>
+            <h3 id="stepsEntryDateTitle" class="modal-title"></h3>
+          </div>
+        </header>
+
+        <form id="stepsForm" class="steps-form" novalidate>
+          <label class="steps-entry-field" for="stepsEntryInput">
+            <span class="field-label">Pasos</span>
+            <input
+              id="stepsEntryInput"
+              class="field-control"
+              type="number"
+              min="0"
+              step="1"
+              inputmode="numeric"
+              placeholder="Ej: 8500">
+          </label>
+          <div class="steps-form-actions">
+            <button id="stepsClearBtn" class="secondary-btn" type="button">Limpiar</button>
+            <button id="stepsSaveBtn" class="secondary-btn" type="submit">Guardar</button>
+          </div>
+        </form>
+      </section>
+
       <p id="stepsState" class="modal-state" aria-live="polite"></p>
     </section>
   </main>

@@ -10,11 +10,17 @@
   const stepsAxisMid = document.getElementById("stepsAxisMid");
   const stepsAxisEnd = document.getElementById("stepsAxisEnd");
   const stepsState = document.getElementById("stepsState");
+  const stepsEntryDateTitle = document.getElementById("stepsEntryDateTitle");
+  const stepsForm = document.getElementById("stepsForm");
+  const stepsEntryInput = document.getElementById("stepsEntryInput");
+  const stepsClearBtn = document.getElementById("stepsClearBtn");
+  const stepsSaveBtn = document.getElementById("stepsSaveBtn");
 
   if (
     !monthLabel || !prevMonthBtn || !nextMonthBtn || !stepsMonthTitle ||
     !stepsTotalValue || !stepsAverageValue || !stepsBestValue ||
-    !stepsBars || !stepsAxisMid || !stepsAxisEnd || !stepsState
+    !stepsBars || !stepsAxisMid || !stepsAxisEnd || !stepsState ||
+    !stepsEntryDateTitle || !stepsForm || !stepsEntryInput || !stepsClearBtn || !stepsSaveBtn
   ) {
     return;
   }
@@ -37,12 +43,16 @@
   const localAdapter = createLocalAdapter();
   let persistence = createPersistenceAdapter(localAdapter);
   let stepsByDate = {};
+  let selectedDateKey = "";
+  let isSaving = false;
 
   init();
 
   async function init() {
     await bootstrapSteps();
+    selectedDateKey = toDateKey(new Date());
     renderStepsPanel();
+    loadSelectedDayForm();
   }
 
   async function bootstrapSteps() {
@@ -85,6 +95,20 @@
     stepsState.textContent = message || "";
   }
 
+  function getErrorMessage(result, fallbackMessage) {
+    if (result && result.error && typeof result.error.message === "string" && result.error.message) {
+      return `${fallbackMessage} (${result.error.message})`;
+    }
+    return fallbackMessage;
+  }
+
+  function setSavingState(busy) {
+    isSaving = busy;
+    stepsEntryInput.disabled = busy;
+    stepsClearBtn.disabled = busy;
+    stepsSaveBtn.disabled = busy;
+  }
+
   function toDateKey(date) {
     return [
       date.getFullYear(),
@@ -96,6 +120,14 @@
   function toDateFromKey(dateKey) {
     const [year, month, day] = dateKey.split("-").map(Number);
     return new Date(year, month - 1, day, 12, 0, 0);
+  }
+
+  function isDateInMonth(dateKey, year, month) {
+    if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      return false;
+    }
+    const date = toDateFromKey(dateKey);
+    return date.getFullYear() === year && date.getMonth() === month;
   }
 
   function normalizeDateKey(rawDate) {
@@ -184,16 +216,52 @@
   }
 
   function createLocalAdapter() {
+    function readRawMap() {
+      const raw = localStorage.getItem(localStorageKey);
+      if (!raw) {
+        return {};
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      return parsed;
+    }
+
     return {
       kind: "local",
       async loadAll() {
         try {
-          const raw = localStorage.getItem(localStorageKey);
-          if (!raw) {
-            return { ok: true, data: {} };
+          return { ok: true, data: parseLocalMap(readRawMap()) };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+      async saveSteps(dateKey, dailySteps) {
+        try {
+          const map = readRawMap();
+          const currentEntry = map[dateKey];
+          const nextEntry = currentEntry && typeof currentEntry === "object" && !Array.isArray(currentEntry)
+            ? { ...currentEntry }
+            : {};
+
+          if (dailySteps == null) {
+            delete nextEntry.dailySteps;
+            delete nextEntry.daily_steps;
+            delete nextEntry.steps;
+          } else {
+            nextEntry.dailySteps = dailySteps;
           }
-          const parsed = JSON.parse(raw);
-          return { ok: true, data: parseLocalMap(parsed) };
+
+          if (Object.keys(nextEntry).length === 0) {
+            delete map[dateKey];
+          } else {
+            map[dateKey] = nextEntry;
+          }
+
+          localStorage.setItem(localStorageKey, JSON.stringify(map));
+          return { ok: true };
         } catch (error) {
           return { ok: false, error };
         }
@@ -242,6 +310,56 @@
         });
 
         return { ok: true, data: map };
+      },
+      async saveSteps(dateKey, dailySteps) {
+        const lookupDayRes = await client
+          .from("workout_days")
+          .select("id")
+          .eq("session_date", dateKey)
+          .order("created_at", { ascending: true })
+          .limit(1);
+
+        if (lookupDayRes.error) {
+          return { ok: false, error: lookupDayRes.error };
+        }
+
+        const dayId = Array.isArray(lookupDayRes.data) && lookupDayRes.data.length > 0
+          ? lookupDayRes.data[0].id
+          : null;
+
+        if (!dayId) {
+          if (dailySteps == null) {
+            return { ok: true };
+          }
+
+          const insertDayRes = await client
+            .from("workout_days")
+            .insert({
+              session_date: dateKey,
+              daily_steps: dailySteps,
+              updated_at: new Date().toISOString()
+            });
+
+          if (insertDayRes.error) {
+            return { ok: false, error: insertDayRes.error };
+          }
+
+          return { ok: true };
+        }
+
+        const updateDayRes = await client
+          .from("workout_days")
+          .update({
+            daily_steps: dailySteps,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", dayId);
+
+        if (updateDayRes.error) {
+          return { ok: false, error: updateDayRes.error };
+        }
+
+        return { ok: true };
       }
     };
   }
@@ -300,9 +418,23 @@
     return Math.min(1, Math.max(minimumVisibleRatio, boostedRatio));
   }
 
+  function ensureSelectedDateInViewMonth(snapshot) {
+    if (isDateInMonth(selectedDateKey, snapshot.year, snapshot.month)) {
+      return;
+    }
+
+    const today = new Date();
+    const isCurrentMonth = snapshot.year === today.getFullYear() && snapshot.month === today.getMonth();
+    const day = isCurrentMonth
+      ? Math.min(today.getDate(), snapshot.daysInMonth)
+      : 1;
+
+    selectedDateKey = toDateKey(new Date(snapshot.year, snapshot.month, day, 12, 0, 0));
+  }
+
   function renderStepsPanel() {
     const snapshot = getMonthStepsSnapshot();
-    const todayKey = toDateKey(new Date());
+    ensureSelectedDateInViewMonth(snapshot);
 
     monthLabel.textContent = `${monthNames[snapshot.month]} ${snapshot.year}`;
     stepsMonthTitle.textContent = `${monthNames[snapshot.month]} ${snapshot.year}`;
@@ -330,7 +462,7 @@
       if (item.steps > 0) {
         bar.classList.add("has-data");
       }
-      if (item.dateKey === todayKey) {
+      if (item.dateKey === selectedDateKey) {
         bar.classList.add("is-selected");
       }
 
@@ -345,14 +477,39 @@
     setState("");
   }
 
-  prevMonthBtn.addEventListener("click", () => {
-    viewDate.setMonth(viewDate.getMonth() - 1);
+  function loadSelectedDayForm() {
+    if (!selectedDateKey) {
+      return;
+    }
+
+    const entry = stepsByDate[selectedDateKey];
+    const steps = entry ? sanitizeDailySteps(entry.dailySteps) : null;
+
+    stepsEntryDateTitle.textContent = formatFullDate(selectedDateKey);
+    stepsEntryInput.value = steps != null ? String(steps) : "";
+  }
+
+  function moveMonth(monthOffset) {
+    const selectedDay = selectedDateKey
+      ? toDateFromKey(selectedDateKey).getDate()
+      : 1;
+
+    viewDate.setMonth(viewDate.getMonth() + monthOffset);
+
+    const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+    const nextDay = Math.min(selectedDay, daysInMonth);
+    selectedDateKey = toDateKey(new Date(viewDate.getFullYear(), viewDate.getMonth(), nextDay, 12, 0, 0));
+
     renderStepsPanel();
+    loadSelectedDayForm();
+  }
+
+  prevMonthBtn.addEventListener("click", () => {
+    moveMonth(-1);
   });
 
   nextMonthBtn.addEventListener("click", () => {
-    viewDate.setMonth(viewDate.getMonth() + 1);
-    renderStepsPanel();
+    moveMonth(1);
   });
 
   stepsBars.addEventListener("click", (event) => {
@@ -360,6 +517,66 @@
     if (!dayBar || !dayBar.dataset.date) {
       return;
     }
-    window.location.href = `index.html?date=${encodeURIComponent(dayBar.dataset.date)}`;
+
+    selectedDateKey = dayBar.dataset.date;
+    renderStepsPanel();
+    loadSelectedDayForm();
+  });
+
+  stepsClearBtn.addEventListener("click", () => {
+    if (isSaving) {
+      return;
+    }
+    stepsEntryInput.value = "";
+    stepsEntryInput.focus();
+  });
+
+  stepsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    if (!selectedDateKey || isSaving) {
+      return;
+    }
+
+    const rawValue = stepsEntryInput.value.trim();
+    const dailySteps = rawValue ? sanitizeDailySteps(rawValue) : null;
+
+    if (rawValue && dailySteps == null) {
+      setState("Pasos diarios: escribe un numero entero valido.");
+      return;
+    }
+
+    setSavingState(true);
+
+    try {
+      const saveResult = await persistence.saveSteps(selectedDateKey, dailySteps);
+      if (!saveResult.ok) {
+        setState(getErrorMessage(
+          saveResult,
+          persistence.kind === "supabase"
+            ? "No se pudieron guardar los pasos en Supabase."
+            : "No se pudieron guardar los pasos en local."
+        ));
+        return;
+      }
+
+      if (dailySteps == null) {
+        delete stepsByDate[selectedDateKey];
+      } else {
+        stepsByDate[selectedDateKey] = { dailySteps };
+      }
+
+      renderStepsPanel();
+      loadSelectedDayForm();
+      setState(
+        dailySteps == null
+          ? "Registro de pasos eliminado para este dia."
+          : persistence.kind === "supabase"
+            ? "Pasos guardados en Supabase."
+            : "Pasos guardados en local."
+      );
+    } finally {
+      setSavingState(false);
+    }
   });
 })();

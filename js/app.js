@@ -8,7 +8,6 @@
   const routineDateTitle = document.getElementById("routineDateTitle");
   const routineState = document.getElementById("routineState");
   const routineForm = document.getElementById("routineForm");
-  const dailyStepsInput = document.getElementById("dailyStepsInput");
   const addExerciseBtn = document.getElementById("addExerciseBtn");
   const classificationList = document.getElementById("classificationList");
   const exercisesList = document.getElementById("exercisesList");
@@ -20,7 +19,7 @@
   if (
     !monthLabel || !weekdayLabels || !calendarGrid || !prevMonthBtn || !nextMonthBtn ||
     !routinePanel || !routineDateTitle || !routineState || !routineForm || !addExerciseBtn ||
-    !dailyStepsInput || !classificationList || !exercisesList || !saveRoutineBtn
+    !classificationList || !exercisesList || !saveRoutineBtn
   ) {
     return;
   }
@@ -123,7 +122,6 @@
     isSaving = busy;
     saveRoutineBtn.disabled = busy;
     addExerciseBtn.disabled = busy;
-    dailyStepsInput.disabled = busy;
     classificationInputs.forEach((input) => {
       input.disabled = busy;
     });
@@ -342,13 +340,6 @@
     }
 
     const exercises = [];
-    const dailySteps = sanitizeDailySteps(
-      rawEntry.dailySteps != null
-        ? rawEntry.dailySteps
-        : rawEntry.daily_steps != null
-          ? rawEntry.daily_steps
-          : rawEntry.steps
-    );
     const classifications = sanitizeClassifications(
       rawEntry.classifications != null
         ? rawEntry.classifications
@@ -371,13 +362,12 @@
       }
     }
 
-    if (exercises.length === 0 && dailySteps == null && classifications.length === 0) {
+    if (exercises.length === 0 && classifications.length === 0) {
       return null;
     }
 
     return {
       exercises,
-      dailySteps,
       classifications,
       updatedAt: typeof rawEntry.updatedAt === "string"
         ? rawEntry.updatedAt
@@ -393,9 +383,8 @@
     }
 
     const hasExercises = Array.isArray(entry.exercises) && entry.exercises.length > 0;
-    const hasSteps = Number.isInteger(entry.dailySteps) && entry.dailySteps >= 0;
     const hasClassifications = getRoutineClassifications(entry).length > 0;
-    return hasExercises || hasSteps || hasClassifications;
+    return hasExercises || hasClassifications;
   }
 
   function getFirstRoutineDateKey() {
@@ -421,25 +410,52 @@
   }
 
   function createLocalAdapter() {
+    function readRawMap() {
+      const raw = localStorage.getItem(localStorageKey);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      return parsed;
+    }
+
     return {
       kind: "local",
       async loadAll() {
         try {
-          const raw = localStorage.getItem(localStorageKey);
-          if (!raw) {
-            return { ok: true, data: {} };
-          }
-          const parsed = JSON.parse(raw);
-          return { ok: true, data: parseLocalMap(parsed) };
+          return { ok: true, data: parseLocalMap(readRawMap()) };
         } catch (error) {
           return { ok: false, error };
         }
       },
       async saveDay(dateKey, routine) {
         try {
-          const currentRaw = localStorage.getItem(localStorageKey);
-          const currentMap = parseLocalMap(currentRaw ? JSON.parse(currentRaw) : {});
-          currentMap[dateKey] = routine;
+          const currentMap = readRawMap();
+          const currentEntry = currentMap[dateKey];
+          const preservedSteps = sanitizeDailySteps(
+            currentEntry && typeof currentEntry === "object"
+              ? currentEntry.dailySteps != null
+                ? currentEntry.dailySteps
+                : currentEntry.daily_steps != null
+                  ? currentEntry.daily_steps
+                  : currentEntry.steps
+              : null
+          );
+
+          const nextEntry = {
+            exercises: routine.exercises,
+            classifications: routine.classifications,
+            updatedAt: routine.updatedAt
+          };
+
+          if (preservedSteps != null) {
+            nextEntry.dailySteps = preservedSteps;
+          }
+
+          currentMap[dateKey] = nextEntry;
           localStorage.setItem(localStorageKey, JSON.stringify(currentMap));
           return { ok: true };
         } catch (error) {
@@ -448,9 +464,23 @@
       },
       async deleteDay(dateKey) {
         try {
-          const currentRaw = localStorage.getItem(localStorageKey);
-          const currentMap = parseLocalMap(currentRaw ? JSON.parse(currentRaw) : {});
-          delete currentMap[dateKey];
+          const currentMap = readRawMap();
+          const currentEntry = currentMap[dateKey];
+          const preservedSteps = sanitizeDailySteps(
+            currentEntry && typeof currentEntry === "object"
+              ? currentEntry.dailySteps != null
+                ? currentEntry.dailySteps
+                : currentEntry.daily_steps != null
+                  ? currentEntry.daily_steps
+                  : currentEntry.steps
+              : null
+          );
+
+          if (preservedSteps != null) {
+            currentMap[dateKey] = { dailySteps: preservedSteps };
+          } else {
+            delete currentMap[dateKey];
+          }
           localStorage.setItem(localStorageKey, JSON.stringify(currentMap));
           return { ok: true };
         } catch (error) {
@@ -478,7 +508,6 @@
 
     function buildDayPayload(routine) {
       const payload = {
-        daily_steps: routine.dailySteps,
         updated_at: routine.updatedAt || new Date().toISOString()
       };
       if (supportsClassificationsColumn) {
@@ -493,14 +522,14 @@
       async loadAll() {
         let daysRes = await client
           .from("workout_days")
-          .select("id, session_date, updated_at, daily_steps, classifications")
+          .select("id, session_date, updated_at, classifications")
           .order("session_date", { ascending: true });
 
         if (daysRes.error && isMissingSupabaseColumnError(daysRes.error, "classifications")) {
           supportsClassificationsColumn = false;
           daysRes = await client
             .from("workout_days")
-            .select("id, session_date, updated_at, daily_steps")
+            .select("id, session_date, updated_at")
             .order("session_date", { ascending: true });
         }
 
@@ -578,7 +607,6 @@
         days.forEach((dayRow) => {
           const dayExercises = exercisesByDayId.get(dayRow.id) || [];
           dayExercises.sort((a, b) => a.exerciseOrder - b.exerciseOrder);
-          const dailySteps = sanitizeDailySteps(dayRow.daily_steps);
           const classifications = supportsClassificationsColumn
             ? sanitizeClassifications(dayRow.classifications)
             : [];
@@ -587,10 +615,9 @@
             sets: exercise.sets
           }));
 
-          if (cleaned.length > 0 || dailySteps != null || classifications.length > 0) {
+          if (cleaned.length > 0 || classifications.length > 0) {
             map[dayRow.session_date] = {
               exercises: cleaned,
-              dailySteps,
               classifications,
               updatedAt: dayRow.updated_at || null
             };
@@ -734,10 +761,72 @@
       },
 
       async deleteDay(dateKey) {
+        const lookupDayRes = await client
+          .from("workout_days")
+          .select("id, daily_steps")
+          .eq("session_date", dateKey)
+          .order("created_at", { ascending: true })
+          .limit(1);
+
+        if (lookupDayRes.error) {
+          return { ok: false, error: lookupDayRes.error };
+        }
+
+        const dayRow = Array.isArray(lookupDayRes.data) && lookupDayRes.data.length > 0
+          ? lookupDayRes.data[0]
+          : null;
+
+        if (!dayRow || !dayRow.id) {
+          return { ok: true };
+        }
+
+        const deleteExercisesRes = await client
+          .from("workout_exercises")
+          .delete()
+          .eq("day_id", dayRow.id);
+
+        if (deleteExercisesRes.error) {
+          return { ok: false, error: deleteExercisesRes.error };
+        }
+
+        const hasSteps = sanitizeDailySteps(dayRow.daily_steps) != null;
+        if (hasSteps) {
+          const payload = {
+            updated_at: new Date().toISOString()
+          };
+          if (supportsClassificationsColumn) {
+            payload.classifications = [];
+          }
+
+          let updateDayRes = await client
+            .from("workout_days")
+            .update(payload)
+            .eq("id", dayRow.id);
+
+          if (
+            updateDayRes.error &&
+            supportsClassificationsColumn &&
+            isMissingSupabaseColumnError(updateDayRes.error, "classifications")
+          ) {
+            supportsClassificationsColumn = false;
+            updateDayRes = await client
+              .from("workout_days")
+              .update({
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", dayRow.id);
+          }
+
+          if (updateDayRes.error) {
+            return { ok: false, error: updateDayRes.error };
+          }
+          return { ok: true };
+        }
+
         const deleteDayRes = await client
           .from("workout_days")
           .delete()
-          .eq("session_date", dateKey);
+          .eq("id", dayRow.id);
 
         if (deleteDayRes.error) {
           return { ok: false, error: deleteDayRes.error };
@@ -839,10 +928,6 @@
 
   function loadRoutineIntoForm(routine) {
     loadClassificationsIntoForm(routine);
-    dailyStepsInput.value = routine && Number.isInteger(routine.dailySteps)
-      ? String(routine.dailySteps)
-      : "";
-
     clearExerciseCards();
 
     if (routine && Array.isArray(routine.exercises) && routine.exercises.length > 0) {
@@ -923,23 +1008,6 @@
     return !hasAnyWeight;
   }
 
-  function collectDailyStepsFromForm() {
-    const rawSteps = dailyStepsInput.value.trim();
-    if (!rawSteps) {
-      return { ok: true, dailySteps: null };
-    }
-
-    const dailySteps = sanitizeDailySteps(rawSteps);
-    if (dailySteps == null) {
-      return {
-        ok: false,
-        message: "Pasos diarios: escribe un numero entero valido."
-      };
-    }
-
-    return { ok: true, dailySteps };
-  }
-
   function collectClassificationsFromForm() {
     return sanitizeClassifications(
       classificationInputs
@@ -949,15 +1017,11 @@
   }
 
   function collectRoutineFromForm() {
-    const stepsResult = collectDailyStepsFromForm();
-    if (!stepsResult.ok) {
-      return stepsResult;
-    }
     const classifications = collectClassificationsFromForm();
 
     const cards = Array.from(exercisesList.querySelectorAll(".exercise-card"));
     if (cards.length === 0) {
-      return { ok: true, exercises: [], dailySteps: stepsResult.dailySteps, classifications };
+      return { ok: true, exercises: [], classifications };
     }
 
     const exercises = [];
@@ -974,7 +1038,7 @@
       exercises.push(result.exercise);
     }
 
-    return { ok: true, exercises, dailySteps: stepsResult.dailySteps, classifications };
+    return { ok: true, exercises, classifications };
   }
 
   function appendRoutineMarkers(dayBtn, routine) {
@@ -1070,7 +1134,7 @@
       );
       loadRoutineIntoForm(existingRoutine);
     } else {
-      setState("No hay datos en este dia. Agrega clasificacion, pasos o ejercicios.");
+      setState("No hay datos en este dia. Agrega clasificacion o ejercicios.");
       loadRoutineIntoForm(null);
     }
     renderCalendar();
@@ -1168,7 +1232,6 @@
     try {
       if (
         routineResult.exercises.length === 0 &&
-        routineResult.dailySteps == null &&
         routineResult.classifications.length === 0
       ) {
         const deleteResult = await persistence.deleteDay(selectedDateKey);
@@ -1191,7 +1254,6 @@
 
       const nextRoutine = {
         exercises: routineResult.exercises,
-        dailySteps: routineResult.dailySteps,
         classifications: routineResult.classifications,
         updatedAt: new Date().toISOString()
       };

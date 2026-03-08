@@ -404,6 +404,40 @@ body {
   font-weight: 700;
 }
 
+.steps-entry-card {
+  border: 1px solid #3b4654;
+  border-radius: 14px;
+  background: #161d25;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.steps-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.steps-entry-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.steps-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#stepsSaveBtn {
+  border-color: #48605f;
+  background: #1e2d2f;
+  color: #9ddfce;
+}
+
 .modal-header {
   display: flex;
   align-items: flex-end;
